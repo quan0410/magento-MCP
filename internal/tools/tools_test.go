@@ -18,8 +18,8 @@ func clearToolFilterEnv(t *testing.T) {
 func TestRegisterFullScopeByDefault(t *testing.T) {
 	clearToolFilterEnv(t)
 	descs, handlers := tools.Register()
-	if len(descs) != 27 {
-		t.Fatalf("expected full tool scope (27 tools), got %d", len(descs))
+	if len(descs) != 42 {
+		t.Fatalf("expected full tool scope (42 tools), got %d", len(descs))
 	}
 
 	wantedTools := []string{
@@ -41,11 +41,28 @@ func TestRegisterFullScopeByDefault(t *testing.T) {
 		"magento_list_invoices", "magento_get_invoice", "magento_create_shipment",
 		// Store (2)
 		"magento_list_store_views", "magento_list_store_configs",
+		// Promotions & Sales Rules (3)
+		"magento_list_sales_rules", "magento_get_sales_rule", "magento_delete_coupon",
+		// Credit Memos / Refunds (3)
+		"magento_list_credit_memos", "magento_get_credit_memo", "magento_create_credit_memo",
+		// CMS (4)
+		"magento_list_cms_pages", "magento_get_cms_page", "magento_list_cms_blocks", "magento_get_cms_block",
+		// Product Media (2)
+		"magento_list_product_media", "magento_get_product_media",
+		// Cart (3)
+		"magento_create_empty_cart", "magento_get_cart", "magento_add_cart_item",
 	}
 
 	for _, want := range wantedTools {
 		if _, ok := handlers[want]; !ok {
 			t.Fatalf("missing tool handler: %s", want)
+		}
+	}
+
+	for _, d := range descs {
+		doc, ok := d.InputSchema["x-datumbridge-docs"].(string)
+		if !ok || doc == "" {
+			t.Errorf("tool %s missing x-datumbridge-docs in InputSchema", d.Name)
 		}
 	}
 }

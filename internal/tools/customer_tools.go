@@ -13,12 +13,14 @@ import (
 func registerCustomerTools(add toolAdder) {
 	add(
 		"magento_list_customers",
-		"Search and list customers in Magento 2 using searchCriteria (email, lastname, pageSize).",
+		"Search and list customers in Magento 2 using searchCriteria (email, lastname, firstname, group_id, pageSize).",
 		baseProps(map[string]interface{}{
 			"page_size":    map[string]interface{}{"type": "integer", "description": "Page size (default 20)"},
 			"current_page": map[string]interface{}{"type": "integer", "description": "Page number (default 1)"},
 			"email":        map[string]interface{}{"type": "string", "description": "Filter by customer email"},
 			"lastname":     map[string]interface{}{"type": "string", "description": "Filter by customer last name"},
+			"firstname":    map[string]interface{}{"type": "string", "description": "Filter by customer first name"},
+			"group_id":     map[string]interface{}{"type": "integer", "description": "Filter by customer group ID (e.g. 1 for General, 2 for Wholesale)"},
 		}),
 		nil,
 		handleMagentoListCustomers,
@@ -70,20 +72,19 @@ func handleMagentoListCustomers(args json.RawMessage) map[string]interface{} {
 	currentPage := intArg(m, "current_page", 1)
 
 	q := url.Values{}
-	q.Set("searchCriteria[pageSize]", strconv.Itoa(pageSize))
-	q.Set("searchCriteria[currentPage]", strconv.Itoa(currentPage))
+	fb := newFilterBuilder(q, pageSize, currentPage)
 
-	filterIdx := 0
 	if em := strArg(m, "email"); em != "" {
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", filterIdx), "email")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", filterIdx), em)
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", filterIdx), "eq")
-		filterIdx++
+		fb.add("email", "%"+em+"%", "like")
 	}
 	if ln := strArg(m, "lastname"); ln != "" {
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", filterIdx), "lastname")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", filterIdx), "%"+ln+"%")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", filterIdx), "like")
+		fb.add("lastname", "%"+ln+"%", "like")
+	}
+	if fn := strArg(m, "firstname"); fn != "" {
+		fb.add("firstname", "%"+fn+"%", "like")
+	}
+	if grpID := intArg(m, "group_id", -1); grpID >= 0 {
+		fb.add("group_id", strconv.Itoa(grpID), "eq")
 	}
 
 	c, cancel := ctx()

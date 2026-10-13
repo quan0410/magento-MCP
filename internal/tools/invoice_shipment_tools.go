@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 
 	"github.com/datumbridge/magento-mcp/internal/mcp"
 )
@@ -13,10 +12,11 @@ import (
 func registerInvoiceShipmentTools(add toolAdder) {
 	add(
 		"magento_list_invoices",
-		"List invoices in Magento using searchCriteria (pageSize, currentPage).",
+		"List invoices in Magento using searchCriteria (pageSize, currentPage, order_id).",
 		baseProps(map[string]interface{}{
 			"page_size":    map[string]interface{}{"type": "integer", "description": "Page size (default 20)"},
 			"current_page": map[string]interface{}{"type": "integer", "description": "Page number (default 1)"},
+			"order_id":     map[string]interface{}{"type": "string", "description": "Filter invoices by parent Order ID"},
 		}),
 		nil,
 		handleMagentoListInvoices,
@@ -54,8 +54,11 @@ func handleMagentoListInvoices(args json.RawMessage) map[string]interface{} {
 	currentPage := intArg(m, "current_page", 1)
 
 	q := url.Values{}
-	q.Set("searchCriteria[pageSize]", strconv.Itoa(pageSize))
-	q.Set("searchCriteria[currentPage]", strconv.Itoa(currentPage))
+	fb := newFilterBuilder(q, pageSize, currentPage)
+
+	if orderID := strArg(m, "order_id"); orderID != "" {
+		fb.add("order_id", orderID, "eq")
+	}
 
 	c, cancel := ctx()
 	defer cancel()

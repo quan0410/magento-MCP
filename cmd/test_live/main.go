@@ -205,15 +205,95 @@ func main() {
 	runTest("magento_get_invoice", map[string]interface{}{"invoice_id": "999999"}, false)
 	runTest("magento_create_shipment", map[string]interface{}{"order_id": "999999"}, false)
 
-	// 8. MCP STREAMABLE HTTP PROTOCOL (POST /mcp)
-	fmt.Println("\n--- [8] MCP Streamable HTTP Protocol Validation ---")
+	// 8. PROMOTIONS & SALES RULES (3 tools)
+	fmt.Println("\n--- [8] Promotions & Sales Rules (3 tools) ---")
+	rulesRes, _ := runTest("magento_list_sales_rules", map[string]interface{}{"page_size": 5}, true)
+	ruleID := "999999"
+	ruleExpectSuccess := false
+	var rulesData map[string]interface{}
+	if err := json.Unmarshal([]byte(extractContentText(rulesRes)), &rulesData); err == nil {
+		if items, ok := rulesData["items"].([]interface{}); ok && len(items) > 0 {
+			if firstItem, ok := items[0].(map[string]interface{}); ok {
+				if idVal, ok := firstItem["rule_id"].(float64); ok {
+					ruleID = fmt.Sprintf("%.0f", idVal)
+					ruleExpectSuccess = true
+				}
+			}
+		}
+	}
+	runTest("magento_get_sales_rule", map[string]interface{}{"rule_id": ruleID}, ruleExpectSuccess)
+	runTest("magento_delete_coupon", map[string]interface{}{"coupon_id": "999999"}, false)
+
+	// 9. CREDIT MEMOS / REFUNDS (3 tools)
+	fmt.Println("\n--- [9] Credit Memos (3 tools) ---")
+	runTest("magento_list_credit_memos", map[string]interface{}{"page_size": 5}, true)
+	runTest("magento_get_credit_memo", map[string]interface{}{"creditmemo_id": "999999"}, false)
+	runTest("magento_create_credit_memo", map[string]interface{}{"order_id": "999999"}, false)
+
+	// 10. CMS PAGES & BLOCKS (4 tools)
+	fmt.Println("\n--- [10] CMS Pages & Blocks (4 tools) ---")
+	cmsRes, _ := runTest("magento_list_cms_pages", map[string]interface{}{"page_size": 5}, true)
+	pageID := "999999"
+	pageExpectSuccess := false
+	var cmsData map[string]interface{}
+	if err := json.Unmarshal([]byte(extractContentText(cmsRes)), &cmsData); err == nil {
+		if items, ok := cmsData["items"].([]interface{}); ok && len(items) > 0 {
+			if firstItem, ok := items[0].(map[string]interface{}); ok {
+				if idVal, ok := firstItem["id"].(float64); ok {
+					pageID = fmt.Sprintf("%.0f", idVal)
+					pageExpectSuccess = true
+				}
+			}
+		}
+	}
+	runTest("magento_get_cms_page", map[string]interface{}{"page_id": pageID}, pageExpectSuccess)
+
+	blockRes, _ := runTest("magento_list_cms_blocks", map[string]interface{}{"page_size": 5}, true)
+	blockID := "999999"
+	blockExpectSuccess := false
+	var blockData map[string]interface{}
+	if err := json.Unmarshal([]byte(extractContentText(blockRes)), &blockData); err == nil {
+		if items, ok := blockData["items"].([]interface{}); ok && len(items) > 0 {
+			if firstItem, ok := items[0].(map[string]interface{}); ok {
+				if idVal, ok := firstItem["id"].(float64); ok {
+					blockID = fmt.Sprintf("%.0f", idVal)
+					blockExpectSuccess = true
+				}
+			}
+		}
+	}
+	runTest("magento_get_cms_block", map[string]interface{}{"block_id": blockID}, blockExpectSuccess)
+
+	// 11. PRODUCT MEDIA (2 tools)
+	fmt.Println("\n--- [11] Product Media (2 tools) ---")
+	runTest("magento_list_product_media", map[string]interface{}{"sku": "24-MB01"}, true)
+	runTest("magento_get_product_media", map[string]interface{}{"sku": "24-MB01", "entry_id": "1"}, true)
+
+	// 12. CARTS & QUOTES (3 tools)
+	fmt.Println("\n--- [12] Carts & Quotes (3 tools) ---")
+	cartRes, cartOk := runTest("magento_create_empty_cart", map[string]interface{}{}, true)
+	cartID := "999999"
+	cartExpectSuccess := false
+	if cartOk {
+		ct := strings.TrimSpace(extractContentText(cartRes))
+		ct = strings.Trim(ct, "\"")
+		if ct != "" {
+			cartID = ct
+			cartExpectSuccess = true
+		}
+	}
+	runTest("magento_get_cart", map[string]interface{}{"cart_id": cartID}, cartExpectSuccess)
+	runTest("magento_add_cart_item", map[string]interface{}{"cart_id": cartID, "sku": "24-MB01", "qty": 1}, cartExpectSuccess)
+
+	// 13. MCP STREAMABLE HTTP PROTOCOL (POST /mcp)
+	fmt.Println("\n--- [13] MCP Streamable HTTP Protocol Validation ---")
 	server := &mcp.Server{
 		Sessions: mcp.NewSessionStore(),
 		Tools:    descs,
 		Handlers: handlers,
 	}
 
-	// Test 8a: initialize via JSON-RPC
+	// Test initialize via JSON-RPC
 	initReqBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
 	reqInit := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(initReqBody))
 	reqInit.Header.Set("Content-Type", "application/json")
@@ -226,7 +306,7 @@ func main() {
 		fmt.Printf("❌ MCP initialize failed: %d %s\n", wInit.Code, wInit.Body.String())
 	}
 
-	// Test 8b: tools/list via JSON-RPC with session ID
+	// Test tools/list via JSON-RPC with session ID
 	listReqBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`
 	reqList := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(listReqBody))
 	reqList.Header.Set("Content-Type", "application/json")
@@ -239,7 +319,7 @@ func main() {
 		fmt.Printf("❌ MCP tools/list failed: %d %s\n", wList.Code, wList.Body.String())
 	}
 
-	// Test 8c: tools/call via JSON-RPC with session ID
+	// Test tools/call via JSON-RPC with session ID
 	callReqBody := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"magento_list_store_views","arguments":{}}}`
 	reqCall := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(callReqBody))
 	reqCall.Header.Set("Content-Type", "application/json")
@@ -267,8 +347,8 @@ func main() {
 	}
 	fmt.Printf("Total MCP Tools Tested: %d / %d\n", len(results), len(descs))
 	fmt.Printf("Passed: %d | Failed: %d\n", passed, failed)
-	if failed == 0 && len(results) == 27 {
-		fmt.Println("🎉 ALL 27 MCP TOOLS & MCP STREAMABLE HTTP PROTOCOL VERIFIED SUCCESSFULLY!")
+	if failed == 0 && len(results) == len(descs) {
+		fmt.Printf("🎉 ALL %d MCP TOOLS & MCP STREAMABLE HTTP PROTOCOL VERIFIED SUCCESSFULLY!\n", len(descs))
 	}
 	fmt.Println("========================================================================")
 }

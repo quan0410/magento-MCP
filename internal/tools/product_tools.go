@@ -13,12 +13,16 @@ import (
 func registerProductTools(add toolAdder) {
 	add(
 		"magento_list_products",
-		"Search and list products in Magento 2 using searchCriteria (pageSize, currentPage, optional search name or category filter).",
+		"Search and list products in Magento 2 using searchCriteria (pageSize, currentPage, sku, name, type_id, status, price_from, price_to).",
 		baseProps(map[string]interface{}{
 			"page_size":    map[string]interface{}{"type": "integer", "description": "Number of products per page (default 20, max 100)"},
 			"current_page": map[string]interface{}{"type": "integer", "description": "Current page number (default 1)"},
 			"name":         map[string]interface{}{"type": "string", "description": "Filter products whose name contains this value"},
+			"sku":          map[string]interface{}{"type": "string", "description": "Filter products whose SKU contains this value"},
 			"type_id":      map[string]interface{}{"type": "string", "description": "Filter by product type (e.g. simple, configurable, virtual)"},
+			"status":       map[string]interface{}{"type": "integer", "description": "Filter by status: 1 for Enabled, 2 for Disabled"},
+			"price_from":   map[string]interface{}{"type": "number", "description": "Minimum product price filter"},
+			"price_to":     map[string]interface{}{"type": "number", "description": "Maximum product price filter"},
 		}),
 		nil,
 		handleMagentoListProducts,
@@ -94,20 +98,25 @@ func handleMagentoListProducts(args json.RawMessage) map[string]interface{} {
 	currentPage := intArg(m, "current_page", 1)
 
 	q := url.Values{}
-	q.Set("searchCriteria[pageSize]", strconv.Itoa(pageSize))
-	q.Set("searchCriteria[currentPage]", strconv.Itoa(currentPage))
+	fb := newFilterBuilder(q, pageSize, currentPage)
 
-	filterIdx := 0
 	if name := strArg(m, "name"); name != "" {
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", filterIdx), "name")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", filterIdx), "%"+name+"%")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", filterIdx), "like")
-		filterIdx++
+		fb.add("name", "%"+name+"%", "like")
+	}
+	if sku := strArg(m, "sku"); sku != "" {
+		fb.add("sku", "%"+sku+"%", "like")
 	}
 	if typeID := strArg(m, "type_id"); typeID != "" {
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", filterIdx), "type_id")
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", filterIdx), typeID)
-		q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", filterIdx), "eq")
+		fb.add("type_id", typeID, "eq")
+	}
+	if status := intArg(m, "status", 0); status > 0 {
+		fb.add("status", strconv.Itoa(status), "eq")
+	}
+	if priceFrom := floatArg(m, "price_from", -1); priceFrom >= 0 {
+		fb.add("price", fmt.Sprintf("%.2f", priceFrom), "gteq")
+	}
+	if priceTo := floatArg(m, "price_to", -1); priceTo >= 0 {
+		fb.add("price", fmt.Sprintf("%.2f", priceTo), "lteq")
 	}
 
 	c, cancel := ctx()

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"github.com/datumbridge/magento-mcp/internal/mcp"
+	registrydocs "github.com/datumbridge/magento-mcp/registry_docs"
 )
 
 // Register returns the full magento-mcp tool catalogue: products, orders,
@@ -16,10 +17,14 @@ func Register() ([]mcp.ToolDesc, map[string]mcp.ToolHandler) {
 		if !cfg.toolEnabled(name) {
 			return
 		}
+		input := schema(props, required)
+		if doc := registrydocs.Markdown(name); doc != "" {
+			input["x-datumbridge-docs"] = doc
+		}
 		descs = append(descs, mcp.ToolDesc{
 			Name:        name,
 			Description: desc,
-			InputSchema: schema(props, required),
+			InputSchema: input,
 		})
 		handlers[name] = h
 	}
@@ -31,6 +36,11 @@ func Register() ([]mcp.ToolDesc, map[string]mcp.ToolHandler) {
 	registerCategoryTools(add)
 	registerInvoiceShipmentTools(add)
 	registerStoreTools(add)
+	registerPromotionTools(add)
+	registerCreditMemoTools(add)
+	registerCmsTools(add)
+	registerProductMediaTools(add)
+	registerCartTools(add)
 
 	return descs, handlers
 }

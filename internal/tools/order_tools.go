@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 
 	"github.com/datumbridge/magento-mcp/internal/mcp"
 )
@@ -13,11 +12,16 @@ import (
 func registerOrderTools(add toolAdder) {
 	add(
 		"magento_list_orders",
-		"List orders from Magento 2 using searchCriteria (pageSize, currentPage, status filter).",
+		"List orders from Magento 2 using searchCriteria (pageSize, currentPage, status, customer_email, customer_id, increment_id, created_at_from, created_at_to).",
 		baseProps(map[string]interface{}{
-			"page_size":    map[string]interface{}{"type": "integer", "description": "Number of orders per page (default 20, max 100)"},
-			"current_page": map[string]interface{}{"type": "integer", "description": "Page number (default 1)"},
-			"status":       map[string]interface{}{"type": "string", "description": "Filter by order status (e.g. pending, processing, complete, canceled)"},
+			"page_size":        map[string]interface{}{"type": "integer", "description": "Number of orders per page (default 20, max 100)"},
+			"current_page":     map[string]interface{}{"type": "integer", "description": "Page number (default 1)"},
+			"status":           map[string]interface{}{"type": "string", "description": "Filter by order status (e.g. pending, processing, complete, canceled)"},
+			"customer_email":   map[string]interface{}{"type": "string", "description": "Filter by customer email address"},
+			"customer_id":      map[string]interface{}{"type": "string", "description": "Filter by customer entity ID"},
+			"increment_id":     map[string]interface{}{"type": "string", "description": "Filter by human-readable order number (e.g. 000000001)"},
+			"created_at_from":  map[string]interface{}{"type": "string", "description": "Orders created on or after date/time (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD)"},
+			"created_at_to":    map[string]interface{}{"type": "string", "description": "Orders created on or before date/time (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD)"},
 		}),
 		nil,
 		handleMagentoListOrders,
@@ -78,13 +82,25 @@ func handleMagentoListOrders(args json.RawMessage) map[string]interface{} {
 	currentPage := intArg(m, "current_page", 1)
 
 	q := url.Values{}
-	q.Set("searchCriteria[pageSize]", strconv.Itoa(pageSize))
-	q.Set("searchCriteria[currentPage]", strconv.Itoa(currentPage))
+	fb := newFilterBuilder(q, pageSize, currentPage)
 
 	if st := strArg(m, "status"); st != "" {
-		q.Set("searchCriteria[filterGroups][0][filters][0][field]", "status")
-		q.Set("searchCriteria[filterGroups][0][filters][0][value]", st)
-		q.Set("searchCriteria[filterGroups][0][filters][0][conditionType]", "eq")
+		fb.add("status", st, "eq")
+	}
+	if email := strArg(m, "customer_email"); email != "" {
+		fb.add("customer_email", email, "eq")
+	}
+	if custID := strArg(m, "customer_id"); custID != "" {
+		fb.add("customer_id", custID, "eq")
+	}
+	if incID := strArg(m, "increment_id"); incID != "" {
+		fb.add("increment_id", incID, "eq")
+	}
+	if dateFrom := strArg(m, "created_at_from"); dateFrom != "" {
+		fb.add("created_at", dateFrom, "gteq")
+	}
+	if dateTo := strArg(m, "created_at_to"); dateTo != "" {
+		fb.add("created_at", dateTo, "lteq")
 	}
 
 	c, cancel := ctx()

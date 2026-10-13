@@ -23,7 +23,7 @@ Go 1.23, matching the platform standard established in `doc/MCP_TOOL_REFERENCE_A
 
 ## Tools
 
-27 tools across 7 categories:
+42 tools across 12 categories:
 1. **Products** (`internal/tools/product_tools.go`): 6 tools
 2. **Orders** (`internal/tools/order_tools.go`): 5 tools
 3. **Customers** (`internal/tools/customer_tools.go`): 4 tools
@@ -31,6 +31,11 @@ Go 1.23, matching the platform standard established in `doc/MCP_TOOL_REFERENCE_A
 5. **Categories** (`internal/tools/category_tools.go`): 4 tools
 6. **Invoices & Shipments** (`internal/tools/invoice_shipment_tools.go`): 3 tools
 7. **Store Config** (`internal/tools/store_tools.go`): 2 tools
+8. **Promotions & Coupons** (`internal/tools/promotion_tools.go`): 3 tools
+9. **Credit Memos / Refunds** (`internal/tools/creditmemo_tools.go`): 3 tools
+10. **CMS Pages & Blocks** (`internal/tools/cms_tools.go`): 4 tools
+11. **Product Media** (`internal/tools/product_media_tools.go`): 2 tools
+12. **Carts & Quotes** (`internal/tools/cart_tools.go`): 3 tools
 
 ## Security Baseline
 

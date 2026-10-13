@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,3 +176,28 @@ func rawResult(b []byte) map[string]interface{} {
 	}
 	return mcp.ToolResultText(string(b))
 }
+
+type filterBuilder struct {
+	q          url.Values
+	groupCount int
+}
+
+func newFilterBuilder(q url.Values, pageSize, currentPage int) *filterBuilder {
+	q.Set("searchCriteria[pageSize]", strconv.Itoa(pageSize))
+	q.Set("searchCriteria[currentPage]", strconv.Itoa(currentPage))
+	return &filterBuilder{q: q, groupCount: 0}
+}
+
+func (fb *filterBuilder) add(field, value, conditionType string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	if conditionType == "" {
+		conditionType = "eq"
+	}
+	fb.q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", fb.groupCount), field)
+	fb.q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", fb.groupCount), value)
+	fb.q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", fb.groupCount), conditionType)
+	fb.groupCount++
+}
+
