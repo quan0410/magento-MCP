@@ -12,10 +12,33 @@ import (
 // (internal/credentials/vault.go).
 type Credentials struct {
 	BaseURL           string `json:"base_url"`
-	ConsumerKey       string `json:"consumer_key"`
-	ConsumerSecret    string `json:"consumer_secret"`
+	ConsumerKey       string `json:"consumer_key,omitempty"`
+	ConsumerSecret    string `json:"consumer_secret,omitempty"`
 	AccessToken       string `json:"access_token"`
-	AccessTokenSecret string `json:"access_token_secret"`
+	AccessTokenSecret string `json:"access_token_secret,omitempty"`
+	AuthMode          string `json:"auth_mode,omitempty"`
+}
+
+// IsBearer returns true if Bearer token authentication should be used.
+func (c *Credentials) IsBearer() bool {
+	if c == nil {
+		return false
+	}
+	mode := strings.ToLower(strings.TrimSpace(c.AuthMode))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(os.Getenv("MAGENTO_AUTH_MODE")))
+	}
+	if mode == "bearer" {
+		return true
+	}
+	if mode == "oauth1" {
+		return false
+	}
+	// If any OAuth 1.0a keys are missing, default to Bearer
+	if c.ConsumerKey == "" || c.ConsumerSecret == "" || c.AccessTokenSecret == "" {
+		return true
+	}
+	return false
 }
 
 // NormalizeBaseURL strips trailing slashes and ensures standard scheme.
@@ -93,18 +116,27 @@ func ParseCredentials(credentialsJSON, credentialsPath string) (*Credentials, er
 	if strings.TrimSpace(c.AccessTokenSecret) == "" {
 		c.AccessTokenSecret = os.Getenv("MAGENTO_ACCESS_TOKEN_SECRET")
 	}
+	if strings.TrimSpace(c.AuthMode) == "" {
+		c.AuthMode = os.Getenv("MAGENTO_AUTH_MODE")
+	}
 
 	c.BaseURL = NormalizeBaseURL(c.BaseURL)
 	c.ConsumerKey = strings.TrimSpace(c.ConsumerKey)
 	c.ConsumerSecret = strings.TrimSpace(c.ConsumerSecret)
 	c.AccessToken = strings.TrimSpace(c.AccessToken)
 	c.AccessTokenSecret = strings.TrimSpace(c.AccessTokenSecret)
+	c.AuthMode = strings.TrimSpace(c.AuthMode)
 
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("base_url required (credentials_json.base_url or MAGENTO_BASE_URL)")
 	}
-	if c.ConsumerKey == "" || c.ConsumerSecret == "" || c.AccessToken == "" || c.AccessTokenSecret == "" {
-		return nil, fmt.Errorf("all 4 OAuth 1.0a keys required (consumer_key, consumer_secret, access_token, access_token_secret)")
+	if c.AccessToken == "" {
+		return nil, fmt.Errorf("access_token required (credentials_json.access_token or MAGENTO_ACCESS_TOKEN)")
+	}
+	if !c.IsBearer() {
+		if c.ConsumerKey == "" || c.ConsumerSecret == "" || c.AccessTokenSecret == "" {
+			return nil, fmt.Errorf("all 4 OAuth 1.0a keys required (consumer_key, consumer_secret, access_token, access_token_secret) or use bearer auth mode")
+		}
 	}
 	return c, nil
 }

@@ -57,6 +57,24 @@ func TestParseCredentials_MissingRequired(t *testing.T) {
 		t.Fatal("expected error when base_url missing")
 	}
 	if _, err := magento.ParseCredentials(`{"base_url":"https://example.com","consumer_key":"ck"}`, ""); err == nil {
-		t.Fatal("expected error when keys missing")
+		t.Fatal("expected error when access_token missing")
 	}
 }
+
+func TestParseCredentials_BearerMode(t *testing.T) {
+	raw := `{
+		"base_url": "https://mystore.example.com",
+		"access_token": "bearer_token_xyz"
+	}`
+	creds, err := magento.ParseCredentials(raw, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !creds.IsBearer() {
+		t.Fatal("expected IsBearer() to be true when only access_token is provided")
+	}
+	if creds.AccessToken != "bearer_token_xyz" {
+		t.Fatalf("got access_token %q, want bearer_token_xyz", creds.AccessToken)
+	}
+}
+

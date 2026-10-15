@@ -76,6 +76,12 @@ func TestMarkdown_AllToolsExist(t *testing.T) {
 				t.Errorf("doc for %q missing section %q", name, section)
 			}
 		}
+		if !strings.Contains(doc, "Related tool") {
+			t.Errorf("doc for %q missing 'Related tool' in Parameters table", name)
+		}
+		if len(doc) > 24000 {
+			t.Errorf("doc for %q exceeds max 24000 chars: %d", name, len(doc))
+		}
 	}
 }
 

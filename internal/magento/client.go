@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -61,10 +62,44 @@ func (c *Client) restBase() string {
 	return c.creds.BaseURL + "/rest/V1"
 }
 
-// Request executes an OAuth 1.0a signed request against the Magento 2 REST API.
-// It tries the configured or default signature method (HMAC-SHA256 for Magento 2.4.7+ / Mage-OS),
-// and automatically falls back to HMAC-SHA1 if the store rejects the method.
+// encodeRFC3986 encodes url.Values strictly adhering to RFC 3986 (spaces as %20, unreserved chars unchanged).
+func encodeRFC3986(v url.Values) string {
+	if len(v) == 0 {
+		return ""
+	}
+	var buf strings.Builder
+	keys := make([]string, 0, len(v))
+	for k := range v {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		vs := v[k]
+		kEsc := oauthEscape(k)
+		for _, val := range vs {
+			if buf.Len() > 0 {
+				buf.WriteByte('&')
+			}
+			buf.WriteString(kEsc)
+			buf.WriteByte('=')
+			buf.WriteString(oauthEscape(val))
+		}
+	}
+	return buf.String()
+}
+
+// Request executes a request against the Magento 2 REST API.
+// If the credentials specify Bearer mode (or only access_token is configured), it uses Bearer authentication.
+// Otherwise, it falls back to OAuth 1.0a (HMAC-SHA256 with HMAC-SHA1 fallback).
 func (c *Client) Request(ctx context.Context, method, path string, query url.Values, body interface{}) ([]byte, int, error) {
+	if c == nil || c.creds == nil {
+		return nil, 0, fmt.Errorf("magento client not configured")
+	}
+
+	if c.creds.IsBearer() {
+		return c.requestWithBearer(ctx, method, path, query, body)
+	}
+
 	primaryMethod := strings.TrimSpace(os.Getenv("MAGENTO_OAUTH_SIGNATURE_METHOD"))
 	if primaryMethod == "" {
 		primaryMethod = SignatureMethodSHA256
@@ -82,17 +117,44 @@ func (c *Client) Request(ctx context.Context, method, path string, query url.Val
 	return data, status, err
 }
 
-func (c *Client) requestWithSignature(ctx context.Context, method, path string, query url.Values, body interface{}, signatureMethod string) ([]byte, int, error) {
-	if c == nil || c.creds == nil {
-		return nil, 0, fmt.Errorf("magento client not configured")
-	}
-
+func (c *Client) requestWithBearer(ctx context.Context, method, path string, query url.Values, body interface{}) ([]byte, int, error) {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
 	full := c.restBase() + path
 	if len(query) > 0 {
-		full += "?" + query.Encode()
+		full += "?" + encodeRFC3986(query)
+	}
+
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("encode request body: %w", err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, full, reader)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return c.doRequest(req)
+}
+
+func (c *Client) requestWithSignature(ctx context.Context, method, path string, query url.Values, body interface{}, signatureMethod string) ([]byte, int, error) {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	full := c.restBase() + path
+	if len(query) > 0 {
+		full += "?" + encodeRFC3986(query)
 	}
 
 	authHeader, err := BuildOAuth1HeaderWithMethod(
@@ -127,6 +189,10 @@ func (c *Client) requestWithSignature(ctx context.Context, method, path string, 
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	return c.doRequest(req)
+}
+
+func (c *Client) doRequest(req *http.Request) ([]byte, int, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("magento request failed: %w", err)

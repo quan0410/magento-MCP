@@ -1,5 +1,6 @@
 .env
 bin/
+api
 *.exe
 *.test
 .DS_Store
