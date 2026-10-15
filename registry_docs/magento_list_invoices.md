@@ -24,6 +24,7 @@ The user asks to browse or search customer invoices or check billed amounts for 
 | `page_size` | no | integer | 20 | — | Number of invoices per page (default 20) |
 | `current_page` | no | integer | 1 | — | Page number (default 1) |
 | `order_id` | no | string | "105" | `magento_list_orders` → `items[0].entity_id` | Filter invoices by parent Order ID |
+| `enrich` | no | boolean | true | — | Enrich invoices with customer, order, address and payment details (default true) |
 
 **Related tool** (optional): when the user did not supply this id, Deep runs the named producer on the same MCP server and binds the output field (`tool` → `field`, machine-read as `x-datumbridge-related-tool` + `x-datumbridge-output-field` on the JSON Schema property). Use a concrete bind path (`id`, `boards[0].id`). Leave `—` for free-text, enums, and values only the user can give. Samples stay shapes; never send `"example-id"` live.
 
@@ -32,9 +33,18 @@ The user asks to browse or search customer invoices or check billed amounts for 
 | Name | Sample | Meaning |
 |---|---|---|
 | `items[].entity_id` | 78 | Invoice entity ID |
+| `items[].increment_id` | "000000001" | Invoice increment number |
 | `items[].order_id` | 105 | Associated order entity ID |
 | `items[].grand_total` | 148.00 | Total invoice amount |
 | `items[].state` | 2 | Invoice state (2 = Paid) |
+| `items[].state_name` | "Paid" | Human-readable invoice state (Paid, Open, Canceled) |
+| `items[].order` | `{"order_id": 1, "increment_id": "000000001", "status": "processing"}` | Enriched order metadata |
+| `items[].customer` | `{"name": "Veronica Costello", "email": "roni_cost@example.com"}` | Enriched customer info |
+| `items[].billing_address` | `{"street": ["6146 Honey Bluff Parkway"], "city": "Calder", ...}` | Customer billing address |
+| `items[].shipping_address` | `{"street": ["6146 Honey Bluff Parkway"], "city": "Calder", ...}` | Customer shipping address |
+| `items[].payment` | `{"method": "checkmo", "title": "Check / Money order"}` | Payment method details |
+| `items[].shipping` | `{"method": "Flat Rate - Fixed", "shipping_amount": 5.00}` | Shipping method & charges |
+| `items[].items` | `[{"sku": "WS03-XS-Red", "name": "Iris Workout Top", "qty": 1, ...}]` | Invoiced line items |
 | `total_count` | 1 | Total number of invoices |
 
 ## Error codes

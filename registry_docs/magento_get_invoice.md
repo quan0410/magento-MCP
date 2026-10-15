@@ -22,6 +22,7 @@ The user asks for full details or line item breakdowns of an invoice.
 | Name | Required | Type | Sample | Related tool | Meaning |
 |---|---|---|---|---|---|
 | `invoice_id` | yes | string | "78" | `magento_list_invoices` → `items[0].entity_id` | Invoice entity ID |
+| `enrich` | no | boolean | true | — | Enrich invoice with customer, order, address and payment details (default true) |
 
 **Related tool** (optional): when the user did not supply this id, Deep runs the named producer on the same MCP server and binds the output field (`tool` → `field`, machine-read as `x-datumbridge-related-tool` + `x-datumbridge-output-field` on the JSON Schema property). Use a concrete bind path (`id`, `boards[0].id`). Leave `—` for free-text, enums, and values only the user can give. Samples stay shapes; never send `"example-id"` live.
 
@@ -30,9 +31,17 @@ The user asks for full details or line item breakdowns of an invoice.
 | Name | Sample | Meaning |
 |---|---|---|
 | `entity_id` | 78 | Invoice entity ID |
+| `increment_id` | "000000001" | Invoice increment number |
 | `order_id` | 105 | Associated order ID |
 | `grand_total` | 148.00 | Total invoice amount |
 | `subtotal` | 148.00 | Subtotal before tax |
+| `state_name` | "Paid" | Human-readable invoice state (Paid, Open, Canceled) |
+| `order` | `{"order_id": 1, "increment_id": "000000001", "status": "processing"}` | Enriched order metadata |
+| `customer` | `{"name": "Veronica Costello", "email": "roni_cost@example.com"}` | Enriched customer info |
+| `billing_address` | `{"street": ["6146 Honey Bluff Parkway"], "city": "Calder", ...}` | Customer billing address |
+| `shipping_address` | `{"street": ["6146 Honey Bluff Parkway"], "city": "Calder", ...}` | Customer shipping address |
+| `payment` | `{"method": "checkmo", "title": "Check / Money order"}` | Payment method details |
+| `shipping` | `{"method": "Flat Rate - Fixed", "shipping_amount": 5.00}` | Shipping method & charges |
 | `items` | `[{"item_id": 112, "sku": "24-MB01", "qty": 2, ...}]` | List of invoiced line items with quantities and totals |
 
 ## Error codes
