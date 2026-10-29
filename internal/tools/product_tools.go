@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/datumbridge/magento-mcp/internal/mcp"
 )
@@ -86,6 +87,22 @@ func registerProductTools(add toolAdder) {
 		baseProps(nil),
 		nil,
 		handleMagentoListProductTypes,
+	)
+
+	add(
+		"magento_get_related_products",
+		"Retrieve related, cross-sell, or up-sell products linked to a product SKU for outfit styling or recommendation.",
+		baseProps(map[string]interface{}{
+			"sku": map[string]interface{}{"type": "string", "description": "Product SKU to find linked products for"},
+			"link_type": map[string]interface{}{
+				"type":        "string",
+				"description": "Type of product link: 'crosssell' (outfit pairing / bundle), 'related' (similar items), or 'upsell' (premium upgrade). Default is 'crosssell'",
+				"enum":        []interface{}{"crosssell", "related", "upsell"},
+			},
+			"limit": map[string]interface{}{"type": "integer", "description": "Maximum number of linked products to return (default 4, max 20)"},
+		}),
+		[]string{"sku"},
+		handleMagentoGetRelatedProducts,
 	)
 }
 
@@ -257,4 +274,138 @@ func handleMagentoListProductTypes(args json.RawMessage) map[string]interface{} 
 		return mcp.ToolResultError(err.Error())
 	}
 	return rawResult(data)
+}
+
+func handleMagentoGetRelatedProducts(args json.RawMessage) map[string]interface{} {
+	client, m, err := clientFrom(args)
+	if err != nil {
+		return mcp.ToolResultError(err.Error())
+	}
+	sku := strArg(m, "sku")
+	if sku == "" {
+		return mcp.ToolResultError("sku is required")
+	}
+
+	linkType := strings.ToLower(strArg(m, "link_type"))
+	if linkType == "" {
+		linkType = "crosssell"
+	}
+	if linkType != "crosssell" && linkType != "related" && linkType != "upsell" {
+		return mcp.ToolResultError("link_type must be one of: 'crosssell', 'related', 'upsell'")
+	}
+	limit := intArg(m, "limit", 4)
+	if limit <= 0 {
+		limit = 4
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	c, cancel := ctx()
+	defer cancel()
+
+	endpoint := fmt.Sprintf("/products/%s/links/%s", url.PathEscape(sku), url.PathEscape(linkType))
+	data, _, err := client.Request(c, http.MethodGet, endpoint, url.Values{}, nil)
+	if err != nil {
+		return mcp.ToolResultError(fmt.Sprintf("Failed to fetch %s links for SKU '%s': %v", linkType, sku, err))
+	}
+
+	var rawLinks []map[string]interface{}
+	if err := json.Unmarshal(data, &rawLinks); err != nil {
+		return mcp.ToolResultError("Failed to parse Magento product links: " + err.Error())
+	}
+
+	if len(rawLinks) == 0 {
+		return jsonResult(map[string]interface{}{
+			"source_sku":  sku,
+			"link_type":   linkType,
+			"items":       []interface{}{},
+			"total_count": 0,
+			"message":     fmt.Sprintf("Sản phẩm '%s' hiện chưa có liên kết %s nào được thiết lập.", sku, linkType),
+		})
+	}
+
+	// Collect linked SKUs up to limit
+	var linkedSKUs []string
+	for _, l := range rawLinks {
+		if linkedSKU, ok := l["linked_product_sku"].(string); ok && linkedSKU != "" {
+			linkedSKUs = append(linkedSKUs, linkedSKU)
+			if len(linkedSKUs) >= limit {
+				break
+			}
+		}
+	}
+
+	if len(linkedSKUs) == 0 {
+		return jsonResult(map[string]interface{}{
+			"source_sku":  sku,
+			"link_type":   linkType,
+			"items":       []interface{}{},
+			"total_count": 0,
+		})
+	}
+
+	// Fetch full details of linked SKUs
+	q := url.Values{}
+	fb := newFilterBuilder(q, len(linkedSKUs), 1)
+	fb.addIn("sku", linkedSKUs)
+
+	prodData, _, err := client.Request(c, http.MethodGet, "/products", q, nil)
+	if err != nil {
+		var fallbackItems []map[string]interface{}
+		for _, s := range linkedSKUs {
+			fallbackItems = append(fallbackItems, map[string]interface{}{
+				"sku": s,
+			})
+		}
+		return jsonResult(map[string]interface{}{
+			"source_sku":  sku,
+			"link_type":   linkType,
+			"items":       fallbackItems,
+			"total_count": len(fallbackItems),
+		})
+	}
+
+	var prodResp struct {
+		Items []map[string]interface{}
+	}
+	if err := json.Unmarshal(prodData, &prodResp); err != nil {
+		return mcp.ToolResultError("Failed to parse linked products details: " + err.Error())
+	}
+
+	getImage := func(prod map[string]interface{}) string {
+		if attrs, ok := prod["custom_attributes"].([]interface{}); ok {
+			for _, a := range attrs {
+				if attr, ok := a.(map[string]interface{}); ok {
+					code, _ := attr["attribute_code"].(string)
+					if code == "thumbnail" || code == "image" || code == "small_image" {
+						val, _ := attr["value"].(string)
+						if val != "" && val != "no_selection" {
+							return val
+						}
+					}
+				}
+			}
+		}
+		return ""
+	}
+
+	var items []map[string]interface{}
+	for _, p := range prodResp.Items {
+		items = append(items, map[string]interface{}{
+			"sku":       p["sku"],
+			"name":      p["name"],
+			"price":     p["price"],
+			"status":    p["status"],
+			"type_id":   p["type_id"],
+			"image_url": getImage(p),
+		})
+	}
+
+	return jsonResult(map[string]interface{}{
+		"source_sku":  sku,
+		"link_type":   linkType,
+		"items":       items,
+		"total_count": len(items),
+	})
 }

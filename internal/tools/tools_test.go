@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,17 +19,19 @@ func clearToolFilterEnv(t *testing.T) {
 func TestRegisterFullScopeByDefault(t *testing.T) {
 	clearToolFilterEnv(t)
 	descs, handlers := tools.Register()
-	if len(descs) != 42 {
-		t.Fatalf("expected full tool scope (42 tools), got %d", len(descs))
+	if len(descs) != 48 {
+		t.Fatalf("expected full tool scope (48 tools), got %d", len(descs))
 	}
 
 	wantedTools := []string{
-		// Products (6)
+		// Products (11)
 		"magento_list_products", "magento_get_product", "magento_create_product",
 		"magento_update_product", "magento_delete_product", "magento_list_product_types",
-		// Orders (5)
+		"magento_get_product_import_template", "magento_import_create_products", "magento_import_update_products",
+		"magento_get_media_import_status", "magento_get_related_products",
+		// Orders (6)
 		"magento_list_orders", "magento_get_order", "magento_add_order_comment",
-		"magento_cancel_order", "magento_hold_order",
+		"magento_cancel_order", "magento_hold_order", "magento_verify_and_get_order", "magento_verify_and_get_order",
 		// Customers (4)
 		"magento_list_customers", "magento_get_customer", "magento_create_customer",
 		"magento_update_customer",
@@ -218,5 +221,131 @@ func TestHandleListStoreViewsSuccess(t *testing.T) {
 	res := handlers["magento_list_store_views"](args)
 	if res["isError"] == true {
 		t.Fatalf("unexpected error result: %+v", res)
+	}
+}
+
+func getToolResultText(res map[string]interface{}) string {
+	switch c := res["content"].(type) {
+	case []map[string]string:
+		if len(c) > 0 {
+			return c[0]["text"]
+		}
+	case []interface{}:
+		if len(c) > 0 {
+			if m, ok := c[0].(map[string]interface{}); ok {
+				return fmt.Sprint(m["text"])
+			}
+		}
+	}
+	return ""
+}
+
+func TestHandleMagentoVerifyAndGetOrder(t *testing.T) {
+	clearToolFilterEnv(t)
+	orderJSON := `{"items":[{"increment_id":"100000025","customer_email":"customer@example.com","status":"processing","created_at":"2026-10-25 10:00:00","grand_total":550000,"order_currency_code":"VND","billing_address":{"firstname":"Van","lastname":"Nguyen","telephone":"0987654321","city":"Ho Chi Minh","region":"District 1"},"items":[{"name":"Ao so mi trang","sku":"SHIRT-WHT-M","qty_ordered":1,"price":550000,"row_total":550000}]}],"total_count":1}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/V1/orders" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(orderJSON))
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	_, handlers := tools.Register()
+
+	// 1. Success with email
+	{
+		var m map[string]interface{}
+		_ = json.Unmarshal(args, &m)
+		m["order_number"] = "#100000025"
+		m["verification"] = "customer@example.com"
+		raw, _ := json.Marshal(m)
+
+		res := handlers["magento_verify_and_get_order"](raw)
+		if res["isError"] == true {
+			t.Fatalf("unexpected error: %+v", res)
+		}
+		text := getToolResultText(res)
+		if !strings.Contains(text, `"verified": true`) && !strings.Contains(text, `"verified":true`) {
+			t.Fatalf("expected verified=true, got: %s", text)
+		}
+		if !strings.Contains(text, "SHIRT-WHT-M") {
+			t.Fatalf("expected item SKU SHIRT-WHT-M, got: %s", text)
+		}
+	}
+
+	// 2. Success with phone
+	{
+		var m map[string]interface{}
+		_ = json.Unmarshal(args, &m)
+		m["order_number"] = "100000025"
+		m["verification"] = "+84987654321"
+		raw, _ := json.Marshal(m)
+
+		res := handlers["magento_verify_and_get_order"](raw)
+		if res["isError"] == true {
+			t.Fatalf("unexpected error: %+v", res)
+		}
+		text := getToolResultText(res)
+		if !strings.Contains(text, `"verified": true`) && !strings.Contains(text, `"verified":true`) {
+			t.Fatalf("expected verified=true with phone, got: %s", text)
+		}
+	}
+
+	// 3. Mismatch verification
+	{
+		var m map[string]interface{}
+		_ = json.Unmarshal(args, &m)
+		m["order_number"] = "100000025"
+		m["verification"] = "wrong@example.com"
+		raw, _ := json.Marshal(m)
+
+		res := handlers["magento_verify_and_get_order"](raw)
+		if res["isError"] == true {
+			t.Fatalf("unexpected error: %+v", res)
+		}
+		text := getToolResultText(res)
+		if !strings.Contains(text, `"verified": false`) && !strings.Contains(text, `"verified":false`) {
+			t.Fatalf("expected verified=false, got: %s", text)
+		}
+	}
+}
+
+func TestHandleMagentoGetRelatedProducts(t *testing.T) {
+	clearToolFilterEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.URL.Path == "/rest/V1/products/SHIRT-01/links/crosssell" {
+			_, _ = w.Write([]byte(`[{"sku":"SHIRT-01","link_type":"crosssell","linked_product_sku":"PANT-01"}]`))
+			return
+		}
+		if r.URL.Path == "/rest/V1/products" {
+			_, _ = w.Write([]byte(`{"items":[{"sku":"PANT-01","name":"Quan tay cong so","price":450000,"status":1,"type_id":"simple"}],"total_count":1}`))
+			return
+		}
+		t.Errorf("unexpected path: %q", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	_, handlers := tools.Register()
+
+	var m map[string]interface{}
+	_ = json.Unmarshal(args, &m)
+	m["sku"] = "SHIRT-01"
+	m["link_type"] = "crosssell"
+	raw, _ := json.Marshal(m)
+
+	res := handlers["magento_get_related_products"](raw)
+	if res["isError"] == true {
+		t.Fatalf("unexpected error: %+v", res)
+	}
+	text := getToolResultText(res)
+	if !strings.Contains(text, "PANT-01") || !strings.Contains(text, "Quan tay cong so") {
+		t.Fatalf("expected PANT-01 in result, got: %s", text)
 	}
 }

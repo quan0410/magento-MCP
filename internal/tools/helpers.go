@@ -188,6 +188,50 @@ func newFilterBuilder(q url.Values, pageSize, currentPage int) *filterBuilder {
 	return &filterBuilder{q: q, groupCount: 0}
 }
 
+func stringSliceArg(m map[string]interface{}, keys ...string) []string {
+	var rawItems []string
+	for _, key := range keys {
+		val, ok := m[key]
+		if !ok || val == nil {
+			continue
+		}
+		switch v := val.(type) {
+		case []interface{}:
+			for _, item := range v {
+				if s := strings.TrimSpace(fmt.Sprint(item)); s != "" {
+					rawItems = append(rawItems, s)
+				}
+			}
+		case []string:
+			for _, s := range v {
+				if trimmed := strings.TrimSpace(s); trimmed != "" {
+					rawItems = append(rawItems, trimmed)
+				}
+			}
+		case string:
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				rawItems = append(rawItems, trimmed)
+			}
+		}
+		if len(rawItems) > 0 {
+			break
+		}
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+	for _, item := range rawItems {
+		for _, part := range strings.Split(item, ",") {
+			s := strings.TrimSpace(part)
+			if s != "" && !seen[s] {
+				seen[s] = true
+				result = append(result, s)
+			}
+		}
+	}
+	return result
+}
+
 func (fb *filterBuilder) add(field, value, conditionType string) {
 	if strings.TrimSpace(value) == "" {
 		return
@@ -200,4 +244,16 @@ func (fb *filterBuilder) add(field, value, conditionType string) {
 	fb.q.Set(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][conditionType]", fb.groupCount), conditionType)
 	fb.groupCount++
 }
+
+func (fb *filterBuilder) addIn(field string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	if len(values) == 1 {
+		fb.add(field, values[0], "eq")
+		return
+	}
+	fb.add(field, strings.Join(values, ","), "in")
+}
+
 

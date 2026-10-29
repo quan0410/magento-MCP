@@ -63,8 +63,8 @@ func main() {
 	httpSrv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 10 * time.Minute, // Allow batch imports (150+ products) without socket hang up
 		IdleTimeout:  120 * time.Second,
 	}
 

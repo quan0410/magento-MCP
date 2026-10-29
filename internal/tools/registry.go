@@ -9,18 +9,24 @@ import (
 
 var toolOutputs = map[string]string{
 	// Products
-	"magento_list_products":      "items, total_count",
-	"magento_get_product":        "id, sku, name, price, status, type_id",
-	"magento_create_product":     "id, sku, name, price, status",
-	"magento_update_product":     "id, sku, name, price, status",
-	"magento_delete_product":     "",
-	"magento_list_product_types": "name, label",
+	"magento_list_products":               "items, total_count",
+	"magento_get_product":                 "id, sku, name, price, status, type_id",
+	"magento_create_product":              "id, sku, name, price, status",
+	"magento_update_product":              "id, sku, name, price, status",
+	"magento_delete_product":              "",
+	"magento_list_product_types":          "name, label",
+	"magento_get_product_import_template": "format, filename, file_base64, fields_guide",
+	"magento_import_create_products":      "total_rows, created_count, failed_count, failed_items, warnings",
+	"magento_import_update_products":      "total_rows, updated_count, failed_count, failed_items, warnings",
+	"magento_get_media_import_status":     "is_running, total_queued, completed, failed, pending, recent_warnings",
+	"magento_get_related_products":        "source_sku, link_type, items",
 	// Orders
 	"magento_list_orders":       "items, total_count",
 	"magento_get_order":         "entity_id, increment_id, status, grand_total, items",
 	"magento_add_order_comment": "",
 	"magento_cancel_order":      "",
 	"magento_hold_order":        "",
+	"magento_verify_and_get_order": "verified, order_number, status, total_amount, shipping, items",
 	// Customers
 	"magento_list_customers":  "items, total_count",
 	"magento_get_customer":    "id, email, firstname, lastname, group_id",
@@ -142,6 +148,8 @@ func Register() ([]mcp.ToolDesc, map[string]mcp.ToolHandler) {
 	}
 
 	registerProductTools(add)
+	registerProductImportTemplateTools(add)
+	registerProductImportTools(add)
 	registerOrderTools(add)
 	registerCustomerTools(add)
 	registerInventoryTools(add)

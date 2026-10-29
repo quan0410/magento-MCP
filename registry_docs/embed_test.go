@@ -6,13 +6,16 @@ import (
 )
 
 var allTools = []string{
-	// Products (6)
+	// Products (9)
 	"magento_list_products",
 	"magento_get_product",
 	"magento_create_product",
 	"magento_update_product",
 	"magento_delete_product",
 	"magento_list_product_types",
+	"magento_get_product_import_template",
+	"magento_import_create_products",
+	"magento_import_update_products",
 	// Orders (5)
 	"magento_list_orders",
 	"magento_get_order",

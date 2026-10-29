@@ -23,8 +23,8 @@ Go 1.23, matching the platform standard established in `doc/MCP_TOOL_REFERENCE_A
 
 ## Tools
 
-42 tools across 12 categories:
-1. **Products** (`internal/tools/product_tools.go`): 6 tools
+45 tools across 12 categories:
+1. **Products** (`internal/tools/product_tools.go`, `import_product_tools.go`, `import_template_tool.go`): 9 tools (includes CRUD + bulk template, create, update from CSV/XLSX)
 2. **Orders** (`internal/tools/order_tools.go`): 5 tools
 3. **Customers** (`internal/tools/customer_tools.go`): 4 tools
 4. **Inventory & MSI** (`internal/tools/inventory_tools.go`): 3 tools

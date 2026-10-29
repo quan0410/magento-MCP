@@ -23,7 +23,8 @@ The user asks to list, browse, or search customer sales orders by status, custom
 |---|---|---|---|---|---|
 | `page_size` | no | integer | 20 | — | Number of orders per page (default 20, max 100) |
 | `current_page` | no | integer | 1 | — | Page number (default 1) |
-| `status` | no | string | "processing" | — | Filter by order status (e.g. pending, processing, complete, canceled, holded) |
+| `status` | no | string | "pending,processing" | — | Filter by order status (e.g. pending, processing, complete, canceled, holded). Supports single status, comma-separated multiple statuses (e.g. "pending,processing"), or array of statuses. |
+| `statuses` | no | array | ["pending", "processing"] | — | Optional array of order statuses to filter by |
 | `customer_email` | no | string | "john@example.com" | — | Filter by customer email address |
 | `customer_id` | no | string | "10" | `magento_list_customers` → `items[0].id` | Filter by customer entity ID |
 | `increment_id` | no | string | "000000105" | — | Filter by sequential order number |
@@ -140,3 +141,39 @@ Output:
   "total_count": 1
 }
 ```
+
+### Filter orders by multiple statuses
+
+Query orders that are in either `pending` or `processing` status.
+
+Input:
+
+```json
+{
+  "status": "pending,processing",
+  "page_size": 10
+}
+```
+
+Output:
+
+```json
+{
+  "items": [
+    {
+      "entity_id": 104,
+      "increment_id": "000000104",
+      "status": "pending",
+      "grand_total": 59.99
+    },
+    {
+      "entity_id": 105,
+      "increment_id": "000000105",
+      "status": "processing",
+      "grand_total": 148.0
+    }
+  ],
+  "total_count": 2
+}
+```
+

@@ -25,7 +25,7 @@ type Client struct {
 }
 
 func NewClient(creds *Credentials) *Client {
-	timeoutSec := 30
+	timeoutSec := 60
 	if v := strings.TrimSpace(os.Getenv("MAGENTO_HTTP_TIMEOUT_SEC")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			timeoutSec = n
@@ -126,13 +126,9 @@ func (c *Client) requestWithBearer(ctx context.Context, method, path string, que
 		full += "?" + encodeRFC3986(query)
 	}
 
-	var reader io.Reader
-	if body != nil {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("encode request body: %w", err)
-		}
-		reader = bytes.NewReader(payload)
+	reader, err := prepareRequestBody(body)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, full, reader)
@@ -170,13 +166,9 @@ func (c *Client) requestWithSignature(ctx context.Context, method, path string, 
 		return nil, 0, fmt.Errorf("build oauth1 header: %w", err)
 	}
 
-	var reader io.Reader
-	if body != nil {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("encode request body: %w", err)
-		}
-		reader = bytes.NewReader(payload)
+	reader, err := prepareRequestBody(body)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, full, reader)
@@ -190,6 +182,26 @@ func (c *Client) requestWithSignature(ctx context.Context, method, path string, 
 	}
 
 	return c.doRequest(req)
+}
+
+func prepareRequestBody(body interface{}) (io.Reader, error) {
+	if body == nil {
+		return nil, nil
+	}
+	switch b := body.(type) {
+	case []byte:
+		return bytes.NewReader(b), nil
+	case string:
+		return strings.NewReader(b), nil
+	case io.Reader:
+		return b, nil
+	default:
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encode request body: %w", err)
+		}
+		return bytes.NewReader(payload), nil
+	}
 }
 
 func (c *Client) doRequest(req *http.Request) ([]byte, int, error) {
