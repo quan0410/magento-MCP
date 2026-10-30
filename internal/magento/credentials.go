@@ -127,16 +127,35 @@ func ParseCredentials(credentialsJSON, credentialsPath string) (*Credentials, er
 	c.AccessTokenSecret = strings.TrimSpace(c.AccessTokenSecret)
 	c.AuthMode = strings.TrimSpace(c.AuthMode)
 
+	var missing []string
 	if c.BaseURL == "" {
-		return nil, fmt.Errorf("base_url required (credentials_json.base_url or MAGENTO_BASE_URL)")
+		missing = append(missing, "base_url (credentials_json.base_url or MAGENTO_BASE_URL)")
 	}
 	if c.AccessToken == "" {
-		return nil, fmt.Errorf("access_token required (credentials_json.access_token or MAGENTO_ACCESS_TOKEN)")
+		missing = append(missing, "access_token (credentials_json.access_token or MAGENTO_ACCESS_TOKEN)")
 	}
 	if !c.IsBearer() {
-		if c.ConsumerKey == "" || c.ConsumerSecret == "" || c.AccessTokenSecret == "" {
-			return nil, fmt.Errorf("all 4 OAuth 1.0a keys required (consumer_key, consumer_secret, access_token, access_token_secret) or use bearer auth mode")
+		var oauthMissing []string
+		if c.ConsumerKey == "" {
+			oauthMissing = append(oauthMissing, "consumer_key (credentials_json.consumer_key or MAGENTO_CONSUMER_KEY)")
 		}
+		if c.ConsumerSecret == "" {
+			oauthMissing = append(oauthMissing, "consumer_secret (credentials_json.consumer_secret or MAGENTO_CONSUMER_SECRET)")
+		}
+		if c.AccessTokenSecret == "" {
+			oauthMissing = append(oauthMissing, "access_token_secret (credentials_json.access_token_secret or MAGENTO_ACCESS_TOKEN_SECRET)")
+		}
+		if len(oauthMissing) > 0 {
+			missing = append(missing, fmt.Sprintf("OAuth 1.0a keys: [%s] (or set auth_mode to bearer)", strings.Join(oauthMissing, ", ")))
+		}
+	}
+
+	if len(missing) > 0 {
+		source := "credentials_json was empty/omitted"
+		if raw != "" {
+			source = fmt.Sprintf("credentials_json provided (%d bytes)", len(raw))
+		}
+		return nil, fmt.Errorf("magento credential error: missing required fields [%s]; input source: %s; hint: connect Magento under Account -> Integrations or set environment variables", strings.Join(missing, "; "), source)
 	}
 	return c, nil
 }
