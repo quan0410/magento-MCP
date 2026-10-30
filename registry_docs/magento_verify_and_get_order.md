@@ -4,6 +4,14 @@ Verify customer ownership of an order using increment ID and email or phone numb
 
 The gateway injects `credentials_json` from the connected Magento 2 account. Do not invent a token, paste a secret, or pass `credentials_path` / `credentials_json`. If those fields appear in the schema, omit them.
 
+## Audience
+
+The MCP server decides this row. Weaver reads it on Setup and does not let an admin change it. Anonymous still runs only through a Digital Employee. Anonymous cannot use a connected account, so its token is `none`.
+
+| Who | Token |
+|---|---|
+| external | required |
+
 ## Agent rules
 
 - Call this tool when an end user or customer asks to check the status or details of their order.

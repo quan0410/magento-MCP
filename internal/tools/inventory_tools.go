@@ -40,6 +40,19 @@ func registerInventoryTools(add toolAdder) {
 		nil,
 		handleMagentoListInventorySources,
 	)
+
+	add(
+		"magento_get_source_items",
+		"Retrieve inventory source items (Multi-Source Inventory / MSI) by product SKU and optional source_code, showing stock quantity and status per source/warehouse.",
+		baseProps(map[string]interface{}{
+			"sku":          map[string]interface{}{"type": "string", "description": "Product SKU to query inventory for"},
+			"source_code":  map[string]interface{}{"type": "string", "description": "Optional inventory source code to filter by specific store/warehouse"},
+			"page_size":    map[string]interface{}{"type": "integer", "description": "Number of items per page (default 50)"},
+			"current_page": map[string]interface{}{"type": "integer", "description": "Page number (default 1)"},
+		}),
+		[]string{"sku"},
+		handleMagentoGetSourceItems,
+	)
 }
 
 func handleMagentoGetStockItem(args json.RawMessage) map[string]interface{} {
@@ -101,6 +114,34 @@ func handleMagentoListInventorySources(args json.RawMessage) map[string]interfac
 	c, cancel := ctx()
 	defer cancel()
 	data, _, err := client.Request(c, http.MethodGet, "/inventory/sources", url.Values{}, nil)
+	if err != nil {
+		return mcp.ToolResultError(err.Error())
+	}
+	return rawResult(data)
+}
+
+func handleMagentoGetSourceItems(args json.RawMessage) map[string]interface{} {
+	client, m, err := clientFrom(args)
+	if err != nil {
+		return mcp.ToolResultError(err.Error())
+	}
+	sku := strArg(m, "sku")
+	if sku == "" {
+		return mcp.ToolResultError("sku is required")
+	}
+	pageSize := intArg(m, "page_size", 50)
+	currentPage := intArg(m, "current_page", 1)
+
+	q := url.Values{}
+	fb := newFilterBuilder(q, pageSize, currentPage)
+	fb.add("sku", sku, "eq")
+	if sc := strArg(m, "source_code"); sc != "" {
+		fb.add("source_code", sc, "eq")
+	}
+
+	c, cancel := ctx()
+	defer cancel()
+	data, _, err := client.Request(c, http.MethodGet, "/inventory/source-items", q, nil)
 	if err != nil {
 		return mcp.ToolResultError(err.Error())
 	}

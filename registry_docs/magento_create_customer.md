@@ -4,6 +4,14 @@ Create a new customer account in Magento 2 with email, first name, and last name
 
 The gateway injects `credentials_json` from the connected Magento 2 account. Do not invent a token, paste a secret, or pass `credentials_path` / `credentials_json`. If those fields appear in the schema, omit them.
 
+## Audience
+
+The MCP server decides this row. Weaver reads it on Setup and does not let an admin change it. Anonymous still runs only through a Digital Employee. Anonymous cannot use a connected account, so its token is `none`.
+
+| Who | Token |
+|---|---|
+| external | required |
+
 ## Agent rules
 
 - Call this tool only for the Magento 2 action in the title. Do not guess missing IDs or SKUs.

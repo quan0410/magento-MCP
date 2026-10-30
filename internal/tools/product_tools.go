@@ -14,12 +14,13 @@ import (
 func registerProductTools(add toolAdder) {
 	add(
 		"magento_list_products",
-		"Search and list products in Magento 2 using searchCriteria (pageSize, currentPage, sku, name, type_id, status, price_from, price_to).",
+		"Search and list products in Magento 2 using searchCriteria (pageSize, currentPage, sku, name, type_id, status, price_from, price_to, category_id).",
 		baseProps(map[string]interface{}{
 			"page_size":    map[string]interface{}{"type": "integer", "description": "Number of products per page (default 20, max 100)"},
 			"current_page": map[string]interface{}{"type": "integer", "description": "Current page number (default 1)"},
 			"name":         map[string]interface{}{"type": "string", "description": "Filter products whose name contains this value"},
 			"sku":          map[string]interface{}{"type": "string", "description": "Filter products whose SKU contains this value"},
+			"category_id":  map[string]interface{}{"type": "string", "description": "Filter products belonging to this category ID"},
 			"type_id":      map[string]interface{}{"type": "string", "description": "Filter by product type (e.g. simple, configurable, virtual)"},
 			"status":       map[string]interface{}{"type": "integer", "description": "Filter by status: 1 for Enabled, 2 for Disabled"},
 			"price_from":   map[string]interface{}{"type": "number", "description": "Minimum product price filter"},
@@ -122,6 +123,9 @@ func handleMagentoListProducts(args json.RawMessage) map[string]interface{} {
 	}
 	if sku := strArg(m, "sku"); sku != "" {
 		fb.add("sku", "%"+sku+"%", "like")
+	}
+	if categoryID := strArg(m, "category_id"); categoryID != "" {
+		fb.add("category_id", categoryID, "eq")
 	}
 	if typeID := strArg(m, "type_id"); typeID != "" {
 		fb.add("type_id", typeID, "eq")

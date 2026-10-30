@@ -27,10 +27,11 @@ var allTools = []string{
 	"magento_get_customer",
 	"magento_create_customer",
 	"magento_update_customer",
-	// Inventory (3)
+	// Inventory (4)
 	"magento_get_stock_item",
 	"magento_update_stock_item",
 	"magento_list_inventory_sources",
+	"magento_get_source_items",
 	// Categories (4)
 	"magento_list_categories",
 	"magento_get_category",
@@ -74,7 +75,7 @@ func TestMarkdown_AllToolsExist(t *testing.T) {
 		if !strings.HasPrefix(doc, "# "+name) {
 			t.Errorf("doc for %q must start with '# %s'", name, name)
 		}
-		for _, section := range []string{"## Agent rules", "## Parameters", "## Success fields", "## Error codes", "## Cases"} {
+		for _, section := range []string{"## Audience", "## Agent rules", "## Parameters", "## Success fields", "## Error codes", "## Cases"} {
 			if !strings.Contains(doc, section) {
 				t.Errorf("doc for %q missing section %q", name, section)
 			}
@@ -84,6 +85,54 @@ func TestMarkdown_AllToolsExist(t *testing.T) {
 		}
 		if len(doc) > 24000 {
 			t.Errorf("doc for %q exceeds max 24000 chars: %d", name, len(doc))
+		}
+	}
+}
+
+func TestMarkdown_AudienceSection(t *testing.T) {
+	for _, name := range allTools {
+		doc := Markdown(name)
+		if !strings.Contains(doc, "## Audience") {
+			t.Fatalf("tool %q missing ## Audience", name)
+		}
+		part := strings.Split(doc, "## Audience")[1]
+		part = strings.Split(part, "\n## ")[0]
+
+		lines := strings.Split(part, "\n")
+		var rows []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "|") && !strings.HasPrefix(trimmed, "|--") && !strings.Contains(trimmed, "Who") {
+				rows = append(rows, trimmed)
+			}
+		}
+		if len(rows) != 1 {
+			t.Fatalf("tool %q: expected 1 Audience row, got %d", name, len(rows))
+		}
+		cols := strings.Split(rows[0], "|")
+		if len(cols) < 3 {
+			t.Fatalf("tool %q: invalid Audience row: %q", name, rows[0])
+		}
+		who := strings.TrimSpace(cols[1])
+		token := strings.TrimSpace(cols[2])
+
+		switch who {
+		case "anonymous", "external", "internal":
+		default:
+			t.Errorf("tool %q: invalid Audience Who: %q", name, who)
+		}
+
+		switch token {
+		case "required", "none":
+		default:
+			t.Errorf("tool %q: invalid Audience Token: %q", name, token)
+		}
+
+		if who == "anonymous" && token != "none" {
+			t.Errorf("tool %q: anonymous audience must use token 'none', got %q", name, token)
+		}
+		if who != "anonymous" && token != "required" {
+			t.Errorf("tool %q: %s audience must use token 'required', got %q", name, who, token)
 		}
 	}
 }

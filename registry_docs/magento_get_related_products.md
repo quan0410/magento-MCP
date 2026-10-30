@@ -4,6 +4,14 @@ Retrieve related, cross-sell, or up-sell products linked to a product SKU for ou
 
 The gateway injects `credentials_json` from the connected Magento 2 account. Do not invent a token, paste a secret, or pass `credentials_path` / `credentials_json`. If those fields appear in the schema, omit them.
 
+## Audience
+
+The MCP server decides this row. Weaver reads it on Setup and does not let an admin change it. Anonymous still runs only through a Digital Employee. Anonymous cannot use a connected account, so its token is `none`.
+
+| Who | Token |
+|---|---|
+| anonymous | none |
+
 ## Agent rules
 
 - Call this tool when a customer is inquiring about what goes well with a product (mix & match / outfit styling), similar products, or upgrades.

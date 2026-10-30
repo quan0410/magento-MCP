@@ -4,6 +4,14 @@ Search and list products in Magento 2 using searchCriteria with pagination and o
 
 The gateway injects `credentials_json` from the connected Magento 2 account. Do not invent a token, paste a secret, or pass `credentials_path` / `credentials_json`. If those fields appear in the schema, omit them.
 
+## Audience
+
+The MCP server decides this row. Weaver reads it on Setup and does not let an admin change it. Anonymous still runs only through a Digital Employee. Anonymous cannot use a connected account, so its token is `none`.
+
+| Who | Token |
+|---|---|
+| anonymous | none |
+
 ## Agent rules
 
 - Call this tool only for the Magento 2 action in the title. Do not guess missing IDs or SKUs.
@@ -25,6 +33,7 @@ The user asks to browse, search, or list products from the Magento catalog, or w
 | `current_page` | no | integer | 1 | — | Current page number (default 1) |
 | `name` | no | string | "Endeavor Daytrip Backpack" | — | Filter products whose name contains this substring |
 | `sku` | no | string | "24-MB01" | `magento_list_products` → `items[0].sku` | Filter products whose SKU contains this substring |
+| `category_id` | no | string | "15" | `magento_list_categories` → `id` | Filter products belonging to this category ID |
 | `type_id` | no | string | "simple" | — | Filter by product type (e.g. simple, configurable, virtual, downloadable) |
 | `status` | no | integer | 1 | — | Filter by status: 1 for Enabled, 2 for Disabled |
 | `price_from` | no | number | 20.0 | — | Minimum product price filter |

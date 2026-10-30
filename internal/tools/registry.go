@@ -36,6 +36,7 @@ var toolOutputs = map[string]string{
 	"magento_get_stock_item":         "item_id, product_id, qty, is_in_stock",
 	"magento_update_stock_item":      "item_id, product_id, qty, is_in_stock",
 	"magento_list_inventory_sources": "items, total_count",
+	"magento_get_source_items":       "items, total_count",
 	// Categories
 	"magento_list_categories":         "id, parent_id, name, children_data",
 	"magento_get_category":            "id, parent_id, name, position",
@@ -87,6 +88,7 @@ var paramRelated = map[string]relatedMeta{
 	"block_id":      {tool: "magento_list_cms_blocks", field: "items[0].id"},
 	"cart_id":       {tool: "magento_create_empty_cart", field: "cart_id"},
 	"entry_id":      {tool: "magento_list_product_media", field: "[0].id"},
+	"source_code":   {tool: "magento_list_inventory_sources", field: "items[0].source_code"},
 }
 
 func annotateRelated(toolName string, props map[string]interface{}) {

@@ -19,8 +19,8 @@ func clearToolFilterEnv(t *testing.T) {
 func TestRegisterFullScopeByDefault(t *testing.T) {
 	clearToolFilterEnv(t)
 	descs, handlers := tools.Register()
-	if len(descs) != 48 {
-		t.Fatalf("expected full tool scope (48 tools), got %d", len(descs))
+	if len(descs) != 49 {
+		t.Fatalf("expected full tool scope (49 tools), got %d", len(descs))
 	}
 
 	wantedTools := []string{
@@ -31,12 +31,13 @@ func TestRegisterFullScopeByDefault(t *testing.T) {
 		"magento_get_media_import_status", "magento_get_related_products",
 		// Orders (6)
 		"magento_list_orders", "magento_get_order", "magento_add_order_comment",
-		"magento_cancel_order", "magento_hold_order", "magento_verify_and_get_order", "magento_verify_and_get_order",
+		"magento_cancel_order", "magento_hold_order", "magento_verify_and_get_order",
 		// Customers (4)
 		"magento_list_customers", "magento_get_customer", "magento_create_customer",
 		"magento_update_customer",
-		// Inventory (3)
+		// Inventory (4)
 		"magento_get_stock_item", "magento_update_stock_item", "magento_list_inventory_sources",
+		"magento_get_source_items",
 		// Categories (4)
 		"magento_list_categories", "magento_get_category", "magento_list_category_products",
 		"magento_assign_category_product",
@@ -347,5 +348,106 @@ func TestHandleMagentoGetRelatedProducts(t *testing.T) {
 	text := getToolResultText(res)
 	if !strings.Contains(text, "PANT-01") || !strings.Contains(text, "Quan tay cong so") {
 		t.Fatalf("expected PANT-01 in result, got: %s", text)
+	}
+}
+
+func TestHandleGetSourceItemsSuccess(t *testing.T) {
+	clearToolFilterEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/V1/inventory/source-items" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		q := r.URL.Query()
+		skuFound := false
+		sourceFound := false
+		for i := 0; i < 5; i++ {
+			field := q.Get(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", i))
+			val := q.Get(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", i))
+			if field == "sku" && val == "BLZ-01" {
+				skuFound = true
+			}
+			if field == "source_code" && val == "vincom_dk" {
+				sourceFound = true
+			}
+		}
+		if !skuFound {
+			t.Errorf("expected sku filter BLZ-01, got query: %v", q)
+		}
+		if !sourceFound {
+			t.Errorf("expected source_code filter vincom_dk, got query: %v", q)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[{"sku":"BLZ-01","source_code":"vincom_dk","quantity":3,"status":1}],"total_count":1}`))
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	var m map[string]interface{}
+	_ = json.Unmarshal(args, &m)
+	m["sku"] = "BLZ-01"
+	m["source_code"] = "vincom_dk"
+	raw, _ := json.Marshal(m)
+
+	_, handlers := tools.Register()
+	res := handlers["magento_get_source_items"](raw)
+	if res["isError"] == true {
+		t.Fatalf("unexpected error: %+v", res)
+	}
+	text := getToolResultText(res)
+	if !strings.Contains(text, "vincom_dk") || !strings.Contains(text, `"quantity": 3`) {
+		t.Fatalf("expected source item details in result, got: %s", text)
+	}
+}
+
+func TestHandleGetSourceItemsMissingSKU(t *testing.T) {
+	clearToolFilterEnv(t)
+	_, handlers := tools.Register()
+	res := handlers["magento_get_source_items"](json.RawMessage(`{"credentials_json":"{\"base_url\":\"https://x.com\",\"consumer_key\":\"k\",\"consumer_secret\":\"s\",\"access_token\":\"t\",\"access_token_secret\":\"ts\"}"}`))
+	if res["isError"] != true {
+		t.Fatalf("expected error result for missing sku, got: %+v", res)
+	}
+}
+
+func TestHandleListProductsWithCategoryID(t *testing.T) {
+	clearToolFilterEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/V1/products" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		q := r.URL.Query()
+		categoryFound := false
+		for i := 0; i < 5; i++ {
+			field := q.Get(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][field]", i))
+			val := q.Get(fmt.Sprintf("searchCriteria[filterGroups][%d][filters][0][value]", i))
+			if field == "category_id" && val == "15" {
+				categoryFound = true
+			}
+		}
+		if !categoryFound {
+			t.Errorf("expected category_id filter 15, got query: %v", q)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[{"sku":"DRESS-01","name":"Vay da hoi den","price":1500000}],"total_count":1}`))
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	var m map[string]interface{}
+	_ = json.Unmarshal(args, &m)
+	m["category_id"] = "15"
+	raw, _ := json.Marshal(m)
+
+	_, handlers := tools.Register()
+	res := handlers["magento_list_products"](raw)
+	if res["isError"] == true {
+		t.Fatalf("unexpected error: %+v", res)
+	}
+	text := getToolResultText(res)
+	if !strings.Contains(text, "DRESS-01") {
+		t.Fatalf("expected DRESS-01 in result, got: %s", text)
 	}
 }
