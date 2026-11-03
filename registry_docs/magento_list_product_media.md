@@ -40,7 +40,9 @@ The user asks what images or videos are attached to a product SKU.
 | `[].id` | 1 | Media gallery entry ID |
 | `[].media_type` | "image" | Media type (image, video) |
 | `[].label` | "Image" | Alternate text / image label |
-| `[].file` | "/m/b/mb01-blue-0.jpg" | Relative file path in media storage |
+| `[].file` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete image URL in media storage |
+| `[].url` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete image URL |
+| `[].file_path` | "/m/b/mb01-blue-0.jpg" | Original relative file path in media storage |
 | `[].types` | `["image", "small_image", "thumbnail"]` | Image roles |
 
 ## Error codes

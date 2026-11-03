@@ -63,8 +63,8 @@ var toolOutputs = map[string]string{
 	"magento_list_cms_blocks": "items, total_count",
 	"magento_get_cms_block":   "id, identifier, title, content",
 	// Product Media
-	"magento_list_product_media": "id, media_type, file",
-	"magento_get_product_media":  "id, media_type, file",
+	"magento_list_product_media": "id, media_type, file, url",
+	"magento_get_product_media":  "id, media_type, file, url",
 	// Cart
 	"magento_create_empty_cart": "cart_id",
 	"magento_get_cart":          "id, is_active, items, items_count",

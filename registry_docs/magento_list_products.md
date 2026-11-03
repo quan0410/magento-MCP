@@ -49,6 +49,7 @@ The user asks to browse, search, or list products from the Magento catalog, or w
 | `items[].sku` | "24-MB01" | Unique product SKU identifier |
 | `items[].name` | "Endeavor Daytrip Backpack" | Product display name |
 | `items[].price` | 74.00 | Base price of the product |
+| `items[].image_url` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete primary product image URL |
 | `items[].status` | 1 | Product status: 1 = Enabled, 2 = Disabled |
 | `items[].type_id` | "simple" | Product type code (simple, configurable, etc.) |
 | `total_count` | 14 | Total number of products matching searchCriteria |

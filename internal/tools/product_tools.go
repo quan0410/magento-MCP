@@ -146,6 +146,19 @@ func handleMagentoListProducts(args json.RawMessage) map[string]interface{} {
 	if err != nil {
 		return mcp.ToolResultError(err.Error())
 	}
+
+	mediaBase := getBaseMediaURL(client)
+	var listResp map[string]interface{}
+	if err := json.Unmarshal(data, &listResp); err == nil {
+		if items, ok := listResp["items"].([]interface{}); ok {
+			for _, it := range items {
+				if prod, ok := it.(map[string]interface{}); ok {
+					enrichProductMedia(prod, mediaBase)
+				}
+			}
+		}
+		return jsonResult(listResp)
+	}
 	return rawResult(data)
 }
 
@@ -164,6 +177,13 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 	data, _, err := client.Request(c, http.MethodGet, "/products/"+url.PathEscape(sku), url.Values{}, nil)
 	if err != nil {
 		return mcp.ToolResultError(err.Error())
+	}
+
+	mediaBase := getBaseMediaURL(client)
+	var prod map[string]interface{}
+	if err := json.Unmarshal(data, &prod); err == nil {
+		enrichProductMedia(prod, mediaBase)
+		return jsonResult(prod)
 	}
 	return rawResult(data)
 }

@@ -40,7 +40,9 @@ The user asks for details, media type, or file path of a specific product image 
 |---|---|---|
 | `id` | 1 | Entry ID |
 | `media_type` | "image" | Media type |
-| `file` | "/m/b/mb01-blue-0.jpg" | File path |
+| `file` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete image URL |
+| `url` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete image URL |
+| `file_path` | "/m/b/mb01-blue-0.jpg" | Original relative file path |
 | `position` | 1 | Sort order |
 
 ## Error codes

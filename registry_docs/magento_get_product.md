@@ -41,6 +41,7 @@ The user asks for full details, custom attributes, media gallery, or tier prices
 | `sku` | "24-MB01" | Product SKU |
 | `name` | "Endeavor Daytrip Backpack" | Full product name |
 | `price` | 74.00 | Base unit price |
+| `image_url` | "https://example.com/media/catalog/product/m/b/mb01-blue-0.jpg" | Complete primary product image URL |
 | `status` | 1 | 1 = Enabled, 2 = Disabled |
 | `visibility` | 4 | Catalog & Search visibility level |
 | `type_id` | "simple" | Product type code |
