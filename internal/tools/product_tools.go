@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/datumbridge/magento-mcp/internal/magento"
 	"github.com/datumbridge/magento-mcp/internal/mcp"
 )
 
@@ -183,6 +185,9 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 	var prod map[string]interface{}
 	if err := json.Unmarshal(data, &prod); err == nil {
 		enrichProductMedia(prod, mediaBase)
+		if typeID, _ := prod["type_id"].(string); typeID == "configurable" {
+			enrichConfigurableProduct(c, client, prod)
+		}
 		return jsonResult(prod)
 	}
 	return rawResult(data)
@@ -432,4 +437,158 @@ func handleMagentoGetRelatedProducts(args json.RawMessage) map[string]interface{
 		"items":       items,
 		"total_count": len(items),
 	})
+}
+
+func enrichConfigurableProduct(c context.Context, client *magento.Client, prod map[string]interface{}) {
+	sku, _ := prod["sku"].(string)
+	if sku == "" {
+		return
+	}
+
+	// 1. Fetch children to resolve price, special_price, and variants
+	childData, _, err := client.Request(c, http.MethodGet, "/configurable-products/"+url.PathEscape(sku)+"/children", url.Values{}, nil)
+	if err == nil {
+		var children []map[string]interface{}
+		if err := json.Unmarshal(childData, &children); err == nil && len(children) > 0 {
+			var minPrice float64 = -1
+			var maxPrice float64 = -1
+			var specialPrice float64 = -1
+			var regularPrice float64 = -1
+
+			for _, child := range children {
+				cp := toFloat(child["price"])
+				if cp > 0 {
+					if minPrice < 0 || cp < minPrice {
+						minPrice = cp
+					}
+					if cp > maxPrice {
+						maxPrice = cp
+					}
+					if regularPrice < 0 {
+						regularPrice = cp
+					}
+				}
+				if cas, ok := child["custom_attributes"].([]interface{}); ok {
+					for _, item := range cas {
+						if cm, ok := item.(map[string]interface{}); ok {
+							if cm["attribute_code"] == "special_price" {
+								sp := toFloat(cm["value"])
+								if sp > 0 && (specialPrice < 0 || sp < specialPrice) {
+									specialPrice = sp
+								}
+							}
+						}
+					}
+				}
+			}
+
+			parentPrice := toFloat(prod["price"])
+			if parentPrice == 0 {
+				if specialPrice > 0 {
+					prod["price"] = specialPrice
+					prod["original_price"] = regularPrice
+					prod["special_price"] = specialPrice
+				} else if minPrice > 0 {
+					prod["price"] = minPrice
+					prod["original_price"] = regularPrice
+				}
+			} else if specialPrice > 0 {
+				prod["special_price"] = specialPrice
+				if parentPrice > specialPrice && prod["original_price"] == nil {
+					prod["original_price"] = parentPrice
+				}
+			}
+			if minPrice > 0 {
+				prod["price_min"] = minPrice
+				prod["price_max"] = maxPrice
+			}
+		}
+	}
+
+	// 2. Resolve option labels for configurable_product_options (Color, Size)
+	ext, ok := prod["extension_attributes"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	opts, ok := ext["configurable_product_options"].([]interface{})
+	if !ok || len(opts) == 0 {
+		return
+	}
+
+	var colors []string
+	var sizes []string
+
+	for _, optItem := range opts {
+		optMap, ok := optItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		attrID := fmt.Sprintf("%v", optMap["attribute_id"])
+		label, _ := optMap["label"].(string)
+
+		optData, _, err := client.Request(c, http.MethodGet, "/products/attributes/"+url.PathEscape(attrID)+"/options", url.Values{}, nil)
+		if err != nil {
+			continue
+		}
+		var attrOptions []map[string]interface{}
+		if err := json.Unmarshal(optData, &attrOptions); err != nil {
+			continue
+		}
+		labelMap := make(map[string]string)
+		for _, ao := range attrOptions {
+			valStr := fmt.Sprintf("%v", ao["value"])
+			lblStr, _ := ao["label"].(string)
+			if valStr != "" && lblStr != "" {
+				labelMap[valStr] = lblStr
+			}
+		}
+
+		if vals, ok := optMap["values"].([]interface{}); ok {
+			for _, vItem := range vals {
+				vMap, ok := vItem.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				vIdx := fmt.Sprintf("%v", vMap["value_index"])
+				if lbl, found := labelMap[vIdx]; found {
+					vMap["label"] = lbl
+					lowerLbl := strings.ToLower(label)
+					if strings.Contains(lowerLbl, "color") || strings.Contains(lowerLbl, "màu") {
+						colors = append(colors, lbl)
+					} else if strings.Contains(lowerLbl, "size") || strings.Contains(lowerLbl, "kích") {
+						sizes = append(sizes, lbl)
+					}
+				}
+			}
+		}
+	}
+
+	if len(colors) > 0 {
+		prod["available_colors"] = colors
+	}
+	if len(sizes) > 0 {
+		prod["available_sizes"] = sizes
+	}
+}
+
+func toFloat(v interface{}) float64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case string:
+		var f float64
+		fmt.Sscanf(val, "%f", &f)
+		return f
+	default:
+		return 0
+	}
 }
