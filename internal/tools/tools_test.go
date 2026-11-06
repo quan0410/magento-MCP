@@ -117,6 +117,11 @@ func testCreds(t *testing.T, srv *httptest.Server) json.RawMessage {
 func TestHandleGetProductSuccess(t *testing.T) {
 	clearToolFilterEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/graphql" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"products":{"items":[]}}}`))
+			return
+		}
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "OAuth ") {
 			t.Errorf("missing or invalid OAuth header: %q", auth)

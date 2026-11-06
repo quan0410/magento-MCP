@@ -352,6 +352,18 @@ func TestRunGetProduct_Cleo(t *testing.T) {
 				"data": {
 					"products": {
 						"items": [{
+							"price_range": {
+								"minimum_price": {
+									"regular_price": {"value": 699000, "currency": "VND"},
+									"final_price": {"value": 629100, "currency": "VND"},
+									"discount": {"amount_off": 69900, "percent_off": 10}
+								},
+								"maximum_price": {
+									"regular_price": {"value": 699000, "currency": "VND"},
+									"final_price": {"value": 629100, "currency": "VND"},
+									"discount": {"amount_off": 69900, "percent_off": 10}
+								}
+							},
 							"configurable_options": [{
 								"attribute_code": "color",
 								"values": [

@@ -318,6 +318,8 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 		enrichProductMedia(prod, mediaBase)
 		if typeID, _ := prod["type_id"].(string); typeID == "configurable" {
 			enrichConfigurableProduct(c, client, prod, mediaBase)
+		} else {
+			enrichProductFromGraphQL(c, client, sku, prod)
 		}
 		return jsonResult(prod)
 	}
@@ -579,6 +581,9 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 		mediaBase = getBaseMediaURL(client)
 	}
 
+	// 0. Fetch GraphQL dynamic pricing (Catalog Price Rules) and swatches
+	swatchesByLabel, swatchesByValIdx := enrichProductFromGraphQL(c, client, sku, prod)
+
 	// 1. Fetch children to resolve price, special_price, and variants
 	var children []map[string]interface{}
 	if client != nil {
@@ -617,23 +622,26 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 					}
 				}
 
-				parentPrice := toFloat(prod["price"])
-				if parentPrice == 0 {
-					if specialPrice > 0 {
-						prod["price"] = specialPrice
-						prod["original_price"] = regularPrice
+				// Only calculate from children if GraphQL didn't already resolve catalog rule pricing
+				if prod["original_price"] == nil {
+					parentPrice := toFloat(prod["price"])
+					if parentPrice == 0 {
+						if specialPrice > 0 {
+							prod["price"] = specialPrice
+							prod["original_price"] = regularPrice
+							prod["special_price"] = specialPrice
+						} else if minPrice > 0 {
+							prod["price"] = minPrice
+							prod["original_price"] = regularPrice
+						}
+					} else if specialPrice > 0 {
 						prod["special_price"] = specialPrice
-					} else if minPrice > 0 {
-						prod["price"] = minPrice
-						prod["original_price"] = regularPrice
-					}
-				} else if specialPrice > 0 {
-					prod["special_price"] = specialPrice
-					if parentPrice > specialPrice && prod["original_price"] == nil {
-						prod["original_price"] = parentPrice
+						if parentPrice > specialPrice {
+							prod["original_price"] = parentPrice
+						}
 					}
 				}
-				if minPrice > 0 {
+				if minPrice > 0 && prod["price_min"] == nil {
 					prod["price_min"] = minPrice
 					prod["price_max"] = maxPrice
 				}
@@ -884,8 +892,6 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 			}
 		}
 
-		swatchesByLabel, swatchesByValIdx := fetchSwatchHexFromGraphQL(c, client, sku)
-
 		// D. Output color_images, root colors, and enrich option value maps
 		var colorImages []map[string]interface{}
 		var rootColors []map[string]interface{}
@@ -930,16 +936,46 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 	}
 }
 
-func fetchSwatchHexFromGraphQL(ctx context.Context, client *magento.Client, sku string) (map[string]string, map[string]string) {
+func enrichProductFromGraphQL(ctx context.Context, client *magento.Client, sku string, prod map[string]interface{}) (map[string]string, map[string]string) {
 	byLabel := make(map[string]string)
 	byValIdx := make(map[string]string)
-	if client == nil || strings.TrimSpace(sku) == "" {
+	if client == nil || strings.TrimSpace(sku) == "" || prod == nil {
 		return byLabel, byValIdx
 	}
 
 	gqlQuery := fmt.Sprintf(`query {
   products(filter: { sku: { eq: %q } }) {
     items {
+      price_range {
+        minimum_price {
+          regular_price {
+            value
+            currency
+          }
+          final_price {
+            value
+            currency
+          }
+          discount {
+            amount_off
+            percent_off
+          }
+        }
+        maximum_price {
+          regular_price {
+            value
+            currency
+          }
+          final_price {
+            value
+            currency
+          }
+          discount {
+            amount_off
+            percent_off
+          }
+        }
+      }
       ... on ConfigurableProduct {
         configurable_options {
           attribute_code
@@ -965,6 +1001,32 @@ func fetchSwatchHexFromGraphQL(ctx context.Context, client *magento.Client, sku 
 		Data struct {
 			Products struct {
 				Items []struct {
+					PriceRange struct {
+						MinimumPrice struct {
+							RegularPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"regular_price"`
+							FinalPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"final_price"`
+							Discount struct {
+								AmountOff  float64 `json:"amount_off"`
+								PercentOff float64 `json:"percent_off"`
+							} `json:"discount"`
+						} `json:"minimum_price"`
+						MaximumPrice struct {
+							RegularPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"regular_price"`
+							FinalPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"final_price"`
+						} `json:"maximum_price"`
+					} `json:"price_range"`
 					ConfigurableOptions []struct {
 						AttributeCode string `json:"attribute_code"`
 						Values        []struct {
@@ -985,6 +1047,41 @@ func fetchSwatchHexFromGraphQL(ctx context.Context, client *magento.Client, sku 
 	}
 
 	for _, item := range resp.Data.Products.Items {
+		minP := item.PriceRange.MinimumPrice
+		regPrice := minP.RegularPrice.Value
+		finPrice := minP.FinalPrice.Value
+		pctOff := minP.Discount.PercentOff
+		amtOff := minP.Discount.AmountOff
+
+		if finPrice > 0 && regPrice > 0 && finPrice < regPrice {
+			prod["price"] = finPrice
+			prod["final_price"] = finPrice
+			prod["special_price"] = finPrice
+			prod["original_price"] = regPrice
+			prod["regular_price"] = regPrice
+			if pctOff > 0 {
+				prod["discount"] = fmt.Sprintf("-%d%%", int(pctOff))
+				prod["discount_percent"] = pctOff
+			}
+			if amtOff > 0 {
+				prod["discount_amount"] = amtOff
+			}
+		} else if regPrice > 0 {
+			if toFloat(prod["price"]) == 0 {
+				prod["price"] = regPrice
+			}
+			prod["regular_price"] = regPrice
+		}
+
+		if minP.RegularPrice.Currency != "" && prod["currency"] == nil {
+			curr := minP.RegularPrice.Currency
+			if curr == "VND" {
+				prod["currency"] = "đ"
+			} else {
+				prod["currency"] = curr
+			}
+		}
+
 		for _, opt := range item.ConfigurableOptions {
 			for _, val := range opt.Values {
 				if val.SwatchData != nil && val.SwatchData.Value != "" {
