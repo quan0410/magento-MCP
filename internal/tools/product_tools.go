@@ -181,9 +181,11 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 
 	if sku == "" {
 		// Search product by name
+		// Step 1: Query with visibility != 1 to exclude hidden child variants directly at API level
 		q := url.Values{}
-		fb := newFilterBuilder(q, 10, 1)
+		fb := newFilterBuilder(q, 50, 1)
 		fb.add("name", "%"+name+"%", "like")
+		fb.add("visibility", "1", "neq")
 
 		searchData, _, err := client.Request(c, http.MethodGet, "/products", q, nil)
 		if err != nil {
@@ -198,7 +200,17 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 			return mcp.ToolResultError("failed to parse product search response: " + err.Error())
 		}
 
-		// Fallback: if no items found and name contains multiple words, try searching for the longest word (min 3 runes)
+		// Fallback 1: If no products returned with visibility != 1, try searching without visibility filter
+		if len(searchResp.Items) == 0 {
+			qFallbackVis := url.Values{}
+			fbFallbackVis := newFilterBuilder(qFallbackVis, 50, 1)
+			fbFallbackVis.add("name", "%"+name+"%", "like")
+			if fbData, _, err := client.Request(c, http.MethodGet, "/products", qFallbackVis, nil); err == nil {
+				_ = json.Unmarshal(fbData, &searchResp)
+			}
+		}
+
+		// Fallback 2: If still no items found and name contains multiple words, try searching for the longest word
 		if len(searchResp.Items) == 0 {
 			words := strings.Fields(name)
 			var longest string
@@ -210,10 +222,19 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 			}
 			if len([]rune(longest)) >= 3 && !strings.EqualFold(longest, name) {
 				qFallback := url.Values{}
-				fbFallback := newFilterBuilder(qFallback, 10, 1)
+				fbFallback := newFilterBuilder(qFallback, 50, 1)
 				fbFallback.add("name", "%"+longest+"%", "like")
+				fbFallback.add("visibility", "1", "neq")
 				if fallbackData, _, err := client.Request(c, http.MethodGet, "/products", qFallback, nil); err == nil {
 					_ = json.Unmarshal(fallbackData, &searchResp)
+				}
+				if len(searchResp.Items) == 0 {
+					qKwAll := url.Values{}
+					fbKwAll := newFilterBuilder(qKwAll, 50, 1)
+					fbKwAll.add("name", "%"+longest+"%", "like")
+					if fallbackData, _, err := client.Request(c, http.MethodGet, "/products", qKwAll, nil); err == nil {
+						_ = json.Unmarshal(fallbackData, &searchResp)
+					}
 				}
 			}
 		}
@@ -222,43 +243,60 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 			return mcp.ToolResultError(fmt.Sprintf("no product found matching name '%s'", name))
 		}
 
-		// Pick the best matching item
+		// Select the best candidate product, heavily prioritizing:
+		// 1. Configurable parent products (they contain all variant options: colors, sizes, and stock)
+		// 2. Visible products (visibility > 1: Catalog & Search) over hidden simple variants (visibility == 1)
+		// 3. Exact name matches over suffixed variant names (e.g. "Sol" over "Sol - Đen - S")
+		queryWords := strings.Fields(strings.ToLower(name))
+		bestScore := -999999
 		foundSKU := ""
-		// 1. Check exact match (case-insensitive)
+
 		for _, item := range searchResp.Items {
-			if n, ok := item["name"].(string); ok && strings.EqualFold(strings.TrimSpace(n), name) {
-				if s, ok := item["sku"].(string); ok && s != "" {
-					foundSKU = s
-					break
-				}
+			typeID, _ := item["type_id"].(string)
+			vis := toInt(item["visibility"])
+			itemName, _ := item["name"].(string)
+			s, _ := item["sku"].(string)
+			if s == "" {
+				continue
 			}
-		}
 
-		// 2. If no exact match, score by matching word count
-		if foundSKU == "" && len(searchResp.Items) > 1 {
-			queryWords := strings.Fields(strings.ToLower(name))
-			bestScore := -1
-			for _, item := range searchResp.Items {
-				n, _ := item["name"].(string)
-				nLower := strings.ToLower(n)
-				score := 0
+			score := 0
+
+			// Type bonus: configurable products are parent products that carry all colors/sizes
+			if typeID == "configurable" {
+				score += 500
+			}
+
+			// Visibility bonus: catalog/search visible products are shopper-facing
+			if vis == 4 { // Catalog & Search
+				score += 400
+			} else if vis == 2 || vis == 3 {
+				score += 200
+			} else if vis == 1 { // Not visible individually (hidden child variant)
+				score -= 600
+			}
+
+			// Name matching score
+			cleanItemName := strings.TrimSpace(itemName)
+			if strings.EqualFold(cleanItemName, name) {
+				score += 1000 // Exact name match
+			} else {
+				if strings.HasPrefix(strings.ToLower(cleanItemName), strings.ToLower(name)) {
+					score += 200
+				}
 				for _, w := range queryWords {
-					if strings.Contains(nLower, w) {
-						score++
+					if strings.Contains(strings.ToLower(cleanItemName), w) {
+						score += 20
 					}
 				}
-				if score > bestScore {
-					bestScore = score
-					if s, ok := item["sku"].(string); ok && s != "" {
-						foundSKU = s
-					}
+				// Penalize extra variant suffix characters (e.g. " - Đen - S") if query didn't specify them
+				if len([]rune(cleanItemName)) > len([]rune(name))+2 {
+					score -= (len([]rune(cleanItemName)) - len([]rune(name))) * 2
 				}
 			}
-		}
 
-		// 3. Fallback to first item
-		if foundSKU == "" && len(searchResp.Items) > 0 {
-			if s, ok := searchResp.Items[0]["sku"].(string); ok && s != "" {
+			if score > bestScore {
+				bestScore = score
 				foundSKU = s
 			}
 		}
@@ -685,3 +723,24 @@ func toFloat(v interface{}) float64 {
 		return 0
 	}
 }
+
+func toInt(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case float64:
+		return int(val)
+	case string:
+		var n int
+		fmt.Sscanf(val, "%d", &n)
+		return n
+	default:
+		return 0
+	}
+}
+

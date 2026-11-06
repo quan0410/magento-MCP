@@ -158,18 +158,47 @@ func TestHandleGetProductByNameSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/rest/V1/products":
-			// Search endpoint by name
+			// Search endpoint returns both simple child variant and parent configurable product
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{
 				"items": [
-					{"sku": "WF-ST-008", "name": "Set áo peplum và quần tây Sol", "price": 1890000}
+					{"sku": "WF-ST-008-BLK-S", "name": "Set áo peplum và quần tây Sol - Đen - S", "type_id": "simple", "visibility": 1, "price": 1890000},
+					{"sku": "WF-ST-008", "name": "Set áo peplum và quần tây Sol", "type_id": "configurable", "visibility": 4, "price": 0}
 				],
-				"total_count": 1
+				"total_count": 2
 			}`))
 		case "/rest/V1/products/WF-ST-008":
-			// Detail endpoint
+			// Must select the parent configurable product (WF-ST-008), NOT the child variant (WF-ST-008-BLK-S)
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"sku":"WF-ST-008","name":"Set áo peplum và quần tây Sol","price":1890000,"type_id":"simple"}`))
+			_, _ = w.Write([]byte(`{
+				"sku": "WF-ST-008",
+				"name": "Set áo peplum và quần tây Sol",
+				"type_id": "configurable",
+				"visibility": 4,
+				"price": 0,
+				"extension_attributes": {
+					"configurable_product_options": [
+						{
+							"attribute_id": "93",
+							"label": "Color",
+							"values": [{"value_index": 128}, {"value_index": 129}, {"value_index": 130}]
+						}
+					]
+				}
+			}`))
+		case "/rest/V1/configurable-products/WF-ST-008/children":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"sku": "WF-ST-008-BLK-S", "price": 1890000, "custom_attributes": [{"attribute_code": "special_price", "value": "1701000"}]},
+				{"sku": "WF-ST-008-WIN-S", "price": 1890000}
+			]`))
+		case "/rest/V1/products/attributes/93/options":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"value": "128", "label": "Đen"},
+				{"value": "129", "label": "Rượu vang"},
+				{"value": "130", "label": "Xanh rêu"}
+			]`))
 		default:
 			t.Errorf("unexpected path: %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -187,6 +216,23 @@ func TestHandleGetProductByNameSuccess(t *testing.T) {
 	res := handlers["magento_get_product"](raw)
 	if res["isError"] == true {
 		t.Fatalf("unexpected error result: %+v", res)
+	}
+
+	content := res["content"].([]map[string]string)[0]["text"]
+	var prod map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &prod); err != nil {
+		t.Fatalf("failed to parse product result: %v", err)
+	}
+
+	if prod["sku"] != "WF-ST-008" {
+		t.Errorf("expected parent SKU WF-ST-008, got: %v", prod["sku"])
+	}
+	if prod["type_id"] != "configurable" {
+		t.Errorf("expected type_id configurable, got: %v", prod["type_id"])
+	}
+	colors, ok := prod["available_colors"].([]interface{})
+	if !ok || len(colors) != 3 {
+		t.Errorf("expected 3 available_colors, got: %+v", prod["available_colors"])
 	}
 }
 
