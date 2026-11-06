@@ -148,7 +148,71 @@ func TestHandleGetProductMissingSKU(t *testing.T) {
 	_, handlers := tools.Register()
 	res := handlers["magento_get_product"](json.RawMessage(`{"credentials_json":"{\"base_url\":\"https://x.com\",\"consumer_key\":\"k\",\"consumer_secret\":\"s\",\"access_token\":\"t\",\"access_token_secret\":\"ts\"}"}`))
 	if res["isError"] != true {
-		t.Fatalf("expected error result for missing sku, got: %+v", res)
+		t.Fatalf("expected error result for missing sku and name, got: %+v", res)
+	}
+}
+
+func TestHandleGetProductByNameSuccess(t *testing.T) {
+	clearToolFilterEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/V1/products":
+			// Search endpoint by name
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"items": [
+					{"sku": "WF-ST-008", "name": "Set áo peplum và quần tây Sol", "price": 1890000}
+				],
+				"total_count": 1
+			}`))
+		case "/rest/V1/products/WF-ST-008":
+			// Detail endpoint
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"sku":"WF-ST-008","name":"Set áo peplum và quần tây Sol","price":1890000,"type_id":"simple"}`))
+		default:
+			t.Errorf("unexpected path: %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	var m map[string]interface{}
+	_ = json.Unmarshal(args, &m)
+	m["name"] = "Set áo peplum và quần tây Sol"
+	raw, _ := json.Marshal(m)
+
+	_, handlers := tools.Register()
+	res := handlers["magento_get_product"](raw)
+	if res["isError"] == true {
+		t.Fatalf("unexpected error result: %+v", res)
+	}
+}
+
+func TestHandleGetProductByNameNotFound(t *testing.T) {
+	clearToolFilterEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/rest/V1/products" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"items": [], "total_count": 0}`))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	args := testCreds(t, srv)
+	var m map[string]interface{}
+	_ = json.Unmarshal(args, &m)
+	m["name"] = "Sản phẩm không tồn tại 12345"
+	raw, _ := json.Marshal(m)
+
+	_, handlers := tools.Register()
+	res := handlers["magento_get_product"](raw)
+	if res["isError"] != true {
+		t.Fatalf("expected error result for not found product, got: %+v", res)
 	}
 }
 

@@ -23,13 +23,14 @@ The MCP server decides this row. Weaver reads it on Setup and does not let an ad
 
 ## When to call
 
-The user asks for full details, custom attributes, media gallery, or tier prices for a known product SKU.
+The user asks for full details, custom attributes, media gallery, tier prices, or options for a product by SKU or product name.
 
 ## Parameters
 
 | Name | Required | Type | Sample | Related tool | Meaning |
 |---|---|---|---|---|---|
-| `sku` | yes | string | "24-MB01" | `magento_list_products` → `items[0].sku` | Unique product SKU identifier |
+| `sku` | no | string | "24-MB01" | `magento_list_products` → `items[0].sku` | Unique product SKU identifier (provide either sku or name) |
+| `name` | no | string | "Set áo peplum và quần tây Sol" | — | Product name or keyword to search when SKU is unknown |
 
 **Related tool** (optional): when the user did not supply this id, Deep runs the named producer on the same MCP server and binds the output field (`tool` → `field`, machine-read as `x-datumbridge-related-tool` + `x-datumbridge-output-field` on the JSON Schema property). Use a concrete bind path (`id`, `boards[0].id`). Leave `—` for free-text, enums, and values only the user can give. Samples stay shapes; never send `"example-id"` live.
 

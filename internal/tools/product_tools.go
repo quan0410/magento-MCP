@@ -34,11 +34,12 @@ func registerProductTools(add toolAdder) {
 
 	add(
 		"magento_get_product",
-		"Retrieve full product details by SKU.",
+		"Retrieve full product details by SKU or product name. Provide sku if known; otherwise provide name to search and retrieve product details.",
 		baseProps(map[string]interface{}{
-			"sku": map[string]interface{}{"type": "string", "description": "Product SKU"},
+			"sku":  map[string]interface{}{"type": "string", "description": "Product SKU (provide either sku or name)"},
+			"name": map[string]interface{}{"type": "string", "description": "Product name or keyword to search if SKU is not known"},
 		}),
-		[]string{"sku"},
+		nil,
 		handleMagentoGetProduct,
 	)
 
@@ -169,13 +170,105 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 	if err != nil {
 		return mcp.ToolResultError(err.Error())
 	}
-	sku := strArg(m, "sku")
-	if sku == "" {
-		return mcp.ToolResultError("sku is required")
+	sku := strings.TrimSpace(strArg(m, "sku"))
+	name := strings.TrimSpace(strArg(m, "name"))
+	if sku == "" && name == "" {
+		return mcp.ToolResultError("either sku or name is required")
 	}
 
 	c, cancel := ctx()
 	defer cancel()
+
+	if sku == "" {
+		// Search product by name
+		q := url.Values{}
+		fb := newFilterBuilder(q, 10, 1)
+		fb.add("name", "%"+name+"%", "like")
+
+		searchData, _, err := client.Request(c, http.MethodGet, "/products", q, nil)
+		if err != nil {
+			return mcp.ToolResultError("failed to search product by name: " + err.Error())
+		}
+
+		var searchResp struct {
+			Items []map[string]interface{} `json:"items"`
+			Total int                      `json:"total_count"`
+		}
+		if err := json.Unmarshal(searchData, &searchResp); err != nil {
+			return mcp.ToolResultError("failed to parse product search response: " + err.Error())
+		}
+
+		// Fallback: if no items found and name contains multiple words, try searching for the longest word (min 3 runes)
+		if len(searchResp.Items) == 0 {
+			words := strings.Fields(name)
+			var longest string
+			for _, w := range words {
+				wClean := strings.Trim(w, ",.?!:;\"'()[]{}")
+				if len([]rune(wClean)) > len([]rune(longest)) {
+					longest = wClean
+				}
+			}
+			if len([]rune(longest)) >= 3 && !strings.EqualFold(longest, name) {
+				qFallback := url.Values{}
+				fbFallback := newFilterBuilder(qFallback, 10, 1)
+				fbFallback.add("name", "%"+longest+"%", "like")
+				if fallbackData, _, err := client.Request(c, http.MethodGet, "/products", qFallback, nil); err == nil {
+					_ = json.Unmarshal(fallbackData, &searchResp)
+				}
+			}
+		}
+
+		if len(searchResp.Items) == 0 {
+			return mcp.ToolResultError(fmt.Sprintf("no product found matching name '%s'", name))
+		}
+
+		// Pick the best matching item
+		foundSKU := ""
+		// 1. Check exact match (case-insensitive)
+		for _, item := range searchResp.Items {
+			if n, ok := item["name"].(string); ok && strings.EqualFold(strings.TrimSpace(n), name) {
+				if s, ok := item["sku"].(string); ok && s != "" {
+					foundSKU = s
+					break
+				}
+			}
+		}
+
+		// 2. If no exact match, score by matching word count
+		if foundSKU == "" && len(searchResp.Items) > 1 {
+			queryWords := strings.Fields(strings.ToLower(name))
+			bestScore := -1
+			for _, item := range searchResp.Items {
+				n, _ := item["name"].(string)
+				nLower := strings.ToLower(n)
+				score := 0
+				for _, w := range queryWords {
+					if strings.Contains(nLower, w) {
+						score++
+					}
+				}
+				if score > bestScore {
+					bestScore = score
+					if s, ok := item["sku"].(string); ok && s != "" {
+						foundSKU = s
+					}
+				}
+			}
+		}
+
+		// 3. Fallback to first item
+		if foundSKU == "" && len(searchResp.Items) > 0 {
+			if s, ok := searchResp.Items[0]["sku"].(string); ok && s != "" {
+				foundSKU = s
+			}
+		}
+
+		if foundSKU == "" {
+			return mcp.ToolResultError(fmt.Sprintf("unable to resolve product SKU for name '%s'", name))
+		}
+		sku = foundSKU
+	}
+
 	data, _, err := client.Request(c, http.MethodGet, "/products/"+url.PathEscape(sku), url.Values{}, nil)
 	if err != nil {
 		return mcp.ToolResultError(err.Error())
