@@ -259,11 +259,22 @@ func (c *Client) GraphQL(ctx context.Context, query string, variables map[string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if c.creds.AccessToken != "" {
+	if c.creds.IsBearer() && c.creds.AccessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
 	}
 
 	data, status, err := c.doRequest(req)
+	// If 401 or token error on GraphQL catalog request, fallback to public query without Authorization header
+	if (status == 401 || err != nil) && req.Header.Get("Authorization") != "" {
+		reqPublic, errPub := http.NewRequestWithContext(ctx, http.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
+		if errPub == nil {
+			reqPublic.Header.Set("Content-Type", "application/json")
+			reqPublic.Header.Set("Accept", "application/json")
+			if pubData, pubStatus, pubErr := c.doRequest(reqPublic); pubErr == nil && pubStatus >= 200 && pubStatus < 300 {
+				return pubData, nil
+			}
+		}
+	}
 	if err != nil {
 		return data, err
 	}
