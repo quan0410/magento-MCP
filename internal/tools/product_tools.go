@@ -884,18 +884,38 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 			}
 		}
 
-		// D. Output color_images and enrich option value maps
+		swatchesByLabel, swatchesByValIdx := fetchSwatchHexFromGraphQL(c, client, sku)
+
+		// D. Output color_images, root colors, and enrich option value maps
 		var colorImages []map[string]interface{}
+		var rootColors []map[string]interface{}
 		for _, col := range collectorList {
+			hexCode := swatchesByLabel[strings.ToLower(strings.TrimSpace(col.label))]
+			if hexCode == "" {
+				hexCode = swatchesByValIdx[col.vIdx]
+			}
+			if hexCode == "" {
+				hexCode = resolveColorHex(col.label)
+			}
+
 			item := map[string]interface{}{
 				"color":       col.label,
+				"color_code":  hexCode,
 				"value_index": col.rawIdx,
 				"image_url":   col.mainImage,
 				"gallery":     col.gallery,
 			}
 			colorImages = append(colorImages, item)
 
+			rootColors = append(rootColors, map[string]interface{}{
+				"name":      col.label,
+				"code":      hexCode,
+				"imageUrl":  col.mainImage,
+				"image_url": col.mainImage,
+			})
+
 			if col.vMap != nil {
+				col.vMap["color_code"] = hexCode
 				col.vMap["image_url"] = col.mainImage
 				col.vMap["gallery"] = col.gallery
 			}
@@ -904,6 +924,144 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 		if len(colorImages) > 0 {
 			prod["color_images"] = colorImages
 		}
+		if len(rootColors) > 0 {
+			prod["colors"] = rootColors
+		}
+	}
+}
+
+func fetchSwatchHexFromGraphQL(ctx context.Context, client *magento.Client, sku string) (map[string]string, map[string]string) {
+	byLabel := make(map[string]string)
+	byValIdx := make(map[string]string)
+	if client == nil || strings.TrimSpace(sku) == "" {
+		return byLabel, byValIdx
+	}
+
+	gqlQuery := fmt.Sprintf(`query {
+  products(filter: { sku: { eq: %q } }) {
+    items {
+      ... on ConfigurableProduct {
+        configurable_options {
+          attribute_code
+          values {
+            value_index
+            label
+            swatch_data {
+              value
+            }
+          }
+        }
+      }
+    }
+  }
+}`, sku)
+
+	data, err := client.GraphQL(ctx, gqlQuery, nil)
+	if err != nil || len(data) == 0 {
+		return byLabel, byValIdx
+	}
+
+	var resp struct {
+		Data struct {
+			Products struct {
+				Items []struct {
+					ConfigurableOptions []struct {
+						AttributeCode string `json:"attribute_code"`
+						Values        []struct {
+							ValueIndex int    `json:"value_index"`
+							Label      string `json:"label"`
+							SwatchData *struct {
+								Value string `json:"value"`
+							} `json:"swatch_data"`
+						} `json:"values"`
+					} `json:"configurable_options"`
+				} `json:"items"`
+			} `json:"products"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return byLabel, byValIdx
+	}
+
+	for _, item := range resp.Data.Products.Items {
+		for _, opt := range item.ConfigurableOptions {
+			for _, val := range opt.Values {
+				if val.SwatchData != nil && val.SwatchData.Value != "" {
+					swatchVal := strings.TrimSpace(val.SwatchData.Value)
+					if strings.HasPrefix(swatchVal, "#") || (len(swatchVal) == 6 && isHex(swatchVal)) {
+						if !strings.HasPrefix(swatchVal, "#") {
+							swatchVal = "#" + swatchVal
+						}
+						lblLower := strings.ToLower(strings.TrimSpace(val.Label))
+						if lblLower != "" {
+							byLabel[lblLower] = swatchVal
+						}
+						vIdxStr := strconv.Itoa(val.ValueIndex)
+						byValIdx[vIdxStr] = swatchVal
+					}
+				}
+			}
+		}
+	}
+
+	return byLabel, byValIdx
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveColorHex(colorName string) string {
+	lower := strings.ToLower(strings.TrimSpace(colorName))
+	switch {
+	case strings.Contains(lower, "latte"):
+		return "#b58f72"
+	case strings.Contains(lower, "denim"):
+		return "#6d8295"
+	case strings.Contains(lower, "olive"):
+		return "#808000"
+	case strings.Contains(lower, "rượu") || strings.Contains(lower, "vang") || strings.Contains(lower, "wine") || strings.Contains(lower, "burgundy") || strings.Contains(lower, "bordeaux"):
+		return "#722f37"
+	case strings.Contains(lower, "mận") || strings.Contains(lower, "plum") || strings.Contains(lower, "đỏ đô") || strings.Contains(lower, "maroon"):
+		return "#701c24"
+	case strings.Contains(lower, "nâu") || strings.Contains(lower, "mocha") || strings.Contains(lower, "brown") || strings.Contains(lower, "chocolate") || strings.Contains(lower, "cafe"):
+		return "#806454"
+	case strings.Contains(lower, "sage"):
+		return "#9caf88"
+	case strings.Contains(lower, "pastel") || strings.Contains(lower, "baby blue") || strings.Contains(lower, "nhạt"):
+		return "#b7dccb"
+	case strings.Contains(lower, "rêu") || strings.Contains(lower, "moss"):
+		return "#5e7153"
+	case strings.Contains(lower, "navy") || strings.Contains(lower, "xanh đen") || strings.Contains(lower, "than"):
+		return "#1e3a5f"
+	case strings.Contains(lower, "trắng") || strings.Contains(lower, "white") || strings.Contains(lower, "kem") || strings.Contains(lower, "ngà"):
+		return "#ffffff"
+	case strings.Contains(lower, "xám") || strings.Contains(lower, "grey") || strings.Contains(lower, "gray") || strings.Contains(lower, "ghi"):
+		return "#94a3b8"
+	case strings.Contains(lower, "be") || strings.Contains(lower, "beige") || strings.Contains(lower, "cream"):
+		return "#e4dac2"
+	case strings.Contains(lower, "hồng") || strings.Contains(lower, "pink"):
+		return "#f472b6"
+	case strings.Contains(lower, "đỏ") || strings.Contains(lower, "red"):
+		return "#dc2626"
+	case strings.Contains(lower, "vàng") || strings.Contains(lower, "yellow"):
+		return "#eab308"
+	case strings.Contains(lower, "cam") || strings.Contains(lower, "orange"):
+		return "#f97316"
+	case strings.Contains(lower, "tím") || strings.Contains(lower, "purple"):
+		return "#a855f7"
+	case strings.Contains(lower, "đen") || strings.Contains(lower, "black"):
+		return "#18181b"
+	case strings.Contains(lower, "xanh") || strings.Contains(lower, "blue"):
+		return "#2563eb"
+	default:
+		return "#64748b"
 	}
 }
 
@@ -948,4 +1106,3 @@ func toInt(v interface{}) int {
 		return 0
 	}
 }
-

@@ -231,6 +231,48 @@ func (c *Client) BaseURL() string {
 	return c.creds.BaseURL
 }
 
+// GraphQL executes a GraphQL query against Magento 2's /graphql endpoint.
+func (c *Client) GraphQL(ctx context.Context, query string, variables map[string]interface{}) ([]byte, error) {
+	if c == nil || c.creds == nil {
+		return nil, fmt.Errorf("magento client not configured")
+	}
+	gqlURL := strings.TrimRight(c.creds.BaseURL, "/") + "/graphql"
+	if c.apiBase != "" {
+		gqlURL = strings.TrimRight(c.apiBase, "/") + "/graphql"
+	}
+
+	payload := map[string]interface{}{
+		"query": query,
+	}
+	if variables != nil {
+		payload["variables"] = variables
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode graphql payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create graphql request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if c.creds.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
+	}
+
+	data, status, err := c.doRequest(req)
+	if err != nil {
+		return data, err
+	}
+	if status < 200 || status >= 300 {
+		return data, fmt.Errorf("graphql HTTP %d: %s", status, string(data))
+	}
+	return data, nil
+}
+
 func sanitizeProviderError(body string) string {
 	body = strings.TrimSpace(body)
 	if body == "" {

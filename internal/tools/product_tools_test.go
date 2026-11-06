@@ -14,11 +14,11 @@ func TestEnrichConfigurableProduct_WithParentContextFallback(t *testing.T) {
 	// Parent product has 3 images (without labels) and 3 colors (Nâu latte, Xanh denim bụi, Xanh olive).
 	// url_key and description specify "Xanh olive".
 	prod := map[string]interface{}{
-		"id":       float64(1636),
-		"sku":      "WF-SK-013",
-		"name":     "Chân váy midi phối đai Cleo",
-		"type_id":  "configurable",
-		"url_key":  "chan-vay-midi-phoi-dai-cleo-xanh-olive-wf-sk-013",
+		"id":        float64(1636),
+		"sku":       "WF-SK-013",
+		"name":      "Chân váy midi phối đai Cleo",
+		"type_id":   "configurable",
+		"url_key":   "chan-vay-midi-phoi-dai-cleo-xanh-olive-wf-sk-013",
 		"image_url": "https://fashion-demo.secomm.vn/media/catalog/product/w/f/wf-sk-013-01_1.jpg",
 		"media_gallery_entries": []interface{}{
 			map[string]interface{}{
@@ -101,6 +101,9 @@ func TestEnrichConfigurableProduct_WithParentContextFallback(t *testing.T) {
 
 	if xanhOliveItem["image_url"] != "https://fashion-demo.secomm.vn/media/catalog/product/w/f/wf-sk-013-01_1.jpg" {
 		t.Errorf("expected first image for 'Xanh olive', got %v", xanhOliveItem["image_url"])
+	}
+	if xanhOliveItem["color_code"] != "#808000" {
+		t.Errorf("expected #808000 for 'Xanh olive', got %v", xanhOliveItem["color_code"])
 	}
 
 	// Verify other colors have empty galleries
@@ -343,6 +346,24 @@ func TestRunGetProduct_Cleo(t *testing.T) {
 				{"value": "99", "label": "L"},
 				{"value": "100", "label": "XL"}
 			]`))
+		case "/graphql":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"data": {
+					"products": {
+						"items": [{
+							"configurable_options": [{
+								"attribute_code": "color",
+								"values": [
+									{"value_index": 126, "label": "Nâu latte", "swatch_data": {"value": "#b58f72"}},
+									{"value_index": 136, "label": "Xanh denim bụi", "swatch_data": {"value": "#6d8295"}},
+									{"value_index": 138, "label": "Xanh olive", "swatch_data": {"value": "#808000"}}
+								]
+							}]
+						}]
+					}
+				}
+			}`))
 		default:
 			t.Errorf("unexpected endpoint requested: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -352,7 +373,7 @@ func TestRunGetProduct_Cleo(t *testing.T) {
 
 	_, handlers := Register()
 	args := map[string]interface{}{
-		"name": "Chân váy midi phối đai Cleo",
+		"name":             "Chân váy midi phối đai Cleo",
 		"credentials_json": fmt.Sprintf(`{"base_url":"%s","consumer_key":"ck","consumer_secret":"cs","access_token":"at","access_token_secret":"ats"}`, srv.URL),
 	}
 	raw, _ := json.Marshal(args)
@@ -364,4 +385,3 @@ func TestRunGetProduct_Cleo(t *testing.T) {
 	content := res["content"].([]map[string]string)[0]["text"]
 	t.Logf("OUTPUT_JSON_RESULT:\n%s", content)
 }
-

@@ -199,6 +199,9 @@ func TestHandleGetProductByNameSuccess(t *testing.T) {
 				{"value": "129", "label": "Rượu vang"},
 				{"value": "130", "label": "Xanh rêu"}
 			]`))
+		case "/graphql":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"products":{"items":[]}}}`))
 		default:
 			t.Errorf("unexpected path: %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
