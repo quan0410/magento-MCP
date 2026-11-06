@@ -317,7 +317,7 @@ func handleMagentoGetProduct(args json.RawMessage) map[string]interface{} {
 	if err := json.Unmarshal(data, &prod); err == nil {
 		enrichProductMedia(prod, mediaBase)
 		if typeID, _ := prod["type_id"].(string); typeID == "configurable" {
-			enrichConfigurableProduct(c, client, prod)
+			enrichConfigurableProduct(c, client, prod, mediaBase)
 		}
 		return jsonResult(prod)
 	}
@@ -570,68 +570,73 @@ func handleMagentoGetRelatedProducts(args json.RawMessage) map[string]interface{
 	})
 }
 
-func enrichConfigurableProduct(c context.Context, client *magento.Client, prod map[string]interface{}) {
+func enrichConfigurableProduct(c context.Context, client *magento.Client, prod map[string]interface{}, mediaBase string) {
 	sku, _ := prod["sku"].(string)
 	if sku == "" {
 		return
 	}
+	if mediaBase == "" && client != nil {
+		mediaBase = getBaseMediaURL(client)
+	}
 
 	// 1. Fetch children to resolve price, special_price, and variants
-	childData, _, err := client.Request(c, http.MethodGet, "/configurable-products/"+url.PathEscape(sku)+"/children", url.Values{}, nil)
-	if err == nil {
-		var children []map[string]interface{}
-		if err := json.Unmarshal(childData, &children); err == nil && len(children) > 0 {
-			var minPrice float64 = -1
-			var maxPrice float64 = -1
-			var specialPrice float64 = -1
-			var regularPrice float64 = -1
+	var children []map[string]interface{}
+	if client != nil {
+		childData, _, err := client.Request(c, http.MethodGet, "/configurable-products/"+url.PathEscape(sku)+"/children", url.Values{}, nil)
+		if err == nil {
+			if err := json.Unmarshal(childData, &children); err == nil && len(children) > 0 {
+				var minPrice float64 = -1
+				var maxPrice float64 = -1
+				var specialPrice float64 = -1
+				var regularPrice float64 = -1
 
-			for _, child := range children {
-				cp := toFloat(child["price"])
-				if cp > 0 {
-					if minPrice < 0 || cp < minPrice {
-						minPrice = cp
+				for _, child := range children {
+					cp := toFloat(child["price"])
+					if cp > 0 {
+						if minPrice < 0 || cp < minPrice {
+							minPrice = cp
+						}
+						if cp > maxPrice {
+							maxPrice = cp
+						}
+						if regularPrice < 0 {
+							regularPrice = cp
+						}
 					}
-					if cp > maxPrice {
-						maxPrice = cp
-					}
-					if regularPrice < 0 {
-						regularPrice = cp
-					}
-				}
-				if cas, ok := child["custom_attributes"].([]interface{}); ok {
-					for _, item := range cas {
-						if cm, ok := item.(map[string]interface{}); ok {
-							if cm["attribute_code"] == "special_price" {
-								sp := toFloat(cm["value"])
-								if sp > 0 && (specialPrice < 0 || sp < specialPrice) {
-									specialPrice = sp
+					if cas, ok := child["custom_attributes"].([]interface{}); ok {
+						for _, item := range cas {
+							if cm, ok := item.(map[string]interface{}); ok {
+								if cm["attribute_code"] == "special_price" {
+									sp := toFloat(cm["value"])
+									if sp > 0 && (specialPrice < 0 || sp < specialPrice) {
+										specialPrice = sp
+									}
 								}
 							}
 						}
 					}
 				}
-			}
 
-			parentPrice := toFloat(prod["price"])
-			if parentPrice == 0 {
-				if specialPrice > 0 {
-					prod["price"] = specialPrice
-					prod["original_price"] = regularPrice
+				parentPrice := toFloat(prod["price"])
+				if parentPrice == 0 {
+					if specialPrice > 0 {
+						prod["price"] = specialPrice
+						prod["original_price"] = regularPrice
+						prod["special_price"] = specialPrice
+					} else if minPrice > 0 {
+						prod["price"] = minPrice
+						prod["original_price"] = regularPrice
+					}
+				} else if specialPrice > 0 {
 					prod["special_price"] = specialPrice
-				} else if minPrice > 0 {
-					prod["price"] = minPrice
-					prod["original_price"] = regularPrice
+					if parentPrice > specialPrice && prod["original_price"] == nil {
+						prod["original_price"] = parentPrice
+					}
 				}
-			} else if specialPrice > 0 {
-				prod["special_price"] = specialPrice
-				if parentPrice > specialPrice && prod["original_price"] == nil {
-					prod["original_price"] = parentPrice
+				if minPrice > 0 {
+					prod["price_min"] = minPrice
+					prod["price_max"] = maxPrice
 				}
-			}
-			if minPrice > 0 {
-				prod["price_min"] = minPrice
-				prod["price_max"] = maxPrice
 			}
 		}
 	}
@@ -649,6 +654,14 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 	var colors []string
 	var sizes []string
 
+	type colorOptionItem struct {
+		Index    string
+		RawIndex interface{}
+		Label    string
+		VMap     map[string]interface{}
+	}
+	var colorItems []colorOptionItem
+
 	for _, optItem := range opts {
 		optMap, ok := optItem.(map[string]interface{})
 		if !ok {
@@ -657,22 +670,26 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 		attrID := fmt.Sprintf("%v", optMap["attribute_id"])
 		label, _ := optMap["label"].(string)
 
-		optData, _, err := client.Request(c, http.MethodGet, "/products/attributes/"+url.PathEscape(attrID)+"/options", url.Values{}, nil)
-		if err != nil {
-			continue
-		}
-		var attrOptions []map[string]interface{}
-		if err := json.Unmarshal(optData, &attrOptions); err != nil {
-			continue
-		}
 		labelMap := make(map[string]string)
-		for _, ao := range attrOptions {
-			valStr := fmt.Sprintf("%v", ao["value"])
-			lblStr, _ := ao["label"].(string)
-			if valStr != "" && lblStr != "" {
-				labelMap[valStr] = lblStr
+		if client != nil {
+			optData, _, err := client.Request(c, http.MethodGet, "/products/attributes/"+url.PathEscape(attrID)+"/options", url.Values{}, nil)
+			if err == nil {
+				var attrOptions []map[string]interface{}
+				if err := json.Unmarshal(optData, &attrOptions); err == nil {
+					for _, ao := range attrOptions {
+						valStr := fmt.Sprintf("%v", ao["value"])
+						lblStr, _ := ao["label"].(string)
+						if valStr != "" && lblStr != "" {
+							labelMap[valStr] = lblStr
+						}
+					}
+				}
 			}
 		}
+
+		lowerLbl := strings.ToLower(label)
+		isColor := strings.Contains(lowerLbl, "color") || strings.Contains(lowerLbl, "màu") || strings.Contains(lowerLbl, "mau")
+		isSize := strings.Contains(lowerLbl, "size") || strings.Contains(lowerLbl, "kích") || strings.Contains(lowerLbl, "kich")
 
 		if vals, ok := optMap["values"].([]interface{}); ok {
 			for _, vItem := range vals {
@@ -680,15 +697,26 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 				if !ok {
 					continue
 				}
-				vIdx := fmt.Sprintf("%v", vMap["value_index"])
+				rawIdx := vMap["value_index"]
+				vIdx := fmt.Sprintf("%v", rawIdx)
 				if lbl, found := labelMap[vIdx]; found {
 					vMap["label"] = lbl
-					lowerLbl := strings.ToLower(label)
-					if strings.Contains(lowerLbl, "color") || strings.Contains(lowerLbl, "màu") {
-						colors = append(colors, lbl)
-					} else if strings.Contains(lowerLbl, "size") || strings.Contains(lowerLbl, "kích") {
-						sizes = append(sizes, lbl)
-					}
+				}
+				lbl, _ := vMap["label"].(string)
+				if lbl == "" {
+					lbl = vIdx
+				}
+
+				if isColor {
+					colors = append(colors, lbl)
+					colorItems = append(colorItems, colorOptionItem{
+						Index:    vIdx,
+						RawIndex: rawIdx,
+						Label:    lbl,
+						VMap:     vMap,
+					})
+				} else if isSize {
+					sizes = append(sizes, lbl)
 				}
 			}
 		}
@@ -699,6 +727,183 @@ func enrichConfigurableProduct(c context.Context, client *magento.Client, prod m
 	}
 	if len(sizes) > 0 {
 		prod["available_sizes"] = sizes
+	}
+
+	// 3. Group images by color variant
+	if len(colorItems) > 0 {
+		type colorGalleryCollector struct {
+			label     string
+			vIdx      string
+			rawIdx    interface{}
+			vMap      map[string]interface{}
+			mainImage string
+			gallery   []string
+			seen      map[string]bool
+		}
+
+		collectorsByVIdx := make(map[string]*colorGalleryCollector)
+		var collectorList []*colorGalleryCollector
+
+		for _, item := range colorItems {
+			col := &colorGalleryCollector{
+				label:   item.Label,
+				vIdx:    item.Index,
+				rawIdx:  item.RawIndex,
+				vMap:    item.VMap,
+				gallery: make([]string, 0),
+				seen:    make(map[string]bool),
+			}
+			collectorsByVIdx[item.Index] = col
+			collectorList = append(collectorList, col)
+		}
+
+		addImage := func(col *colorGalleryCollector, imgURL string) {
+			clean := strings.TrimSpace(imgURL)
+			if clean == "" || col.seen[clean] {
+				return
+			}
+			col.seen[clean] = true
+			col.gallery = append(col.gallery, clean)
+			if col.mainImage == "" {
+				col.mainImage = clean
+			}
+		}
+
+		// A. Collect from children (simple products)
+		for _, child := range children {
+			enrichProductMedia(child, mediaBase)
+
+			var matchedVIdx string
+			if cas, ok := child["custom_attributes"].([]interface{}); ok {
+				for _, it := range cas {
+					if cm, ok := it.(map[string]interface{}); ok {
+						valStr := fmt.Sprintf("%v", cm["value"])
+						if _, exists := collectorsByVIdx[valStr]; exists {
+							matchedVIdx = valStr
+							break
+						}
+					}
+				}
+			}
+
+			if matchedVIdx != "" {
+				col := collectorsByVIdx[matchedVIdx]
+				if childImg, _ := child["image_url"].(string); childImg != "" {
+					addImage(col, childImg)
+				}
+				if rawEntries, ok := child["media_gallery_entries"].([]interface{}); ok {
+					for _, entryItem := range rawEntries {
+						if entryMap, ok := entryItem.(map[string]interface{}); ok {
+							if u, _ := entryMap["url"].(string); u != "" {
+								addImage(col, u)
+							} else if f, _ := entryMap["file"].(string); f != "" {
+								addImage(col, f)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// B. Collect from parent's media_gallery_entries with matching labels
+		if parentEntries, ok := prod["media_gallery_entries"].([]interface{}); ok {
+			for _, entryItem := range parentEntries {
+				entryMap, ok := entryItem.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				imgURL, _ := entryMap["url"].(string)
+				if imgURL == "" {
+					imgURL, _ = entryMap["file"].(string)
+				}
+				if imgURL == "" {
+					continue
+				}
+				entryLabel := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", entryMap["label"])))
+				if entryLabel != "" {
+					for _, col := range collectorList {
+						if strings.Contains(entryLabel, strings.ToLower(col.label)) {
+							addImage(col, imgURL)
+						}
+					}
+				}
+			}
+		}
+
+		// C. Fallback: If no color has images yet, check if parent represents a specific color
+		hasAnyImages := false
+		for _, col := range collectorList {
+			if len(col.gallery) > 0 {
+				hasAnyImages = true
+				break
+			}
+		}
+
+		if !hasAnyImages {
+			parentContext := strings.ToLower(fmt.Sprintf("%v %v", prod["url_key"], prod["name"]))
+			if cas, ok := prod["custom_attributes"].([]interface{}); ok {
+				for _, it := range cas {
+					if cm, ok := it.(map[string]interface{}); ok {
+						code, _ := cm["attribute_code"].(string)
+						if code == "url_key" || code == "short_description" || code == "description" || code == "meta_description" {
+							parentContext += " " + strings.ToLower(fmt.Sprintf("%v", cm["value"]))
+						}
+					}
+				}
+			}
+
+			var matchedCol *colorGalleryCollector
+			matchedCount := 0
+			for _, col := range collectorList {
+				if strings.Contains(parentContext, strings.ToLower(col.label)) {
+					matchedCol = col
+					matchedCount++
+				}
+			}
+
+			if (matchedCount == 1 && matchedCol != nil) || len(collectorList) == 1 {
+				targetCol := matchedCol
+				if targetCol == nil && len(collectorList) == 1 {
+					targetCol = collectorList[0]
+				}
+
+				if pImg, _ := prod["image_url"].(string); pImg != "" {
+					addImage(targetCol, pImg)
+				}
+				if parentEntries, ok := prod["media_gallery_entries"].([]interface{}); ok {
+					for _, entryItem := range parentEntries {
+						if entryMap, ok := entryItem.(map[string]interface{}); ok {
+							if u, _ := entryMap["url"].(string); u != "" {
+								addImage(targetCol, u)
+							} else if f, _ := entryMap["file"].(string); f != "" {
+								addImage(targetCol, f)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// D. Output color_images and enrich option value maps
+		var colorImages []map[string]interface{}
+		for _, col := range collectorList {
+			item := map[string]interface{}{
+				"color":       col.label,
+				"value_index": col.rawIdx,
+				"image_url":   col.mainImage,
+				"gallery":     col.gallery,
+			}
+			colorImages = append(colorImages, item)
+
+			if col.vMap != nil {
+				col.vMap["image_url"] = col.mainImage
+				col.vMap["gallery"] = col.gallery
+			}
+		}
+
+		if len(colorImages) > 0 {
+			prod["color_images"] = colorImages
+		}
 	}
 }
 
