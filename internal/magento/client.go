@@ -3,24 +3,27 @@ package magento
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
+
+	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 )
 
 // Client calls Magento 2's REST API (/rest/V1/...), authenticated with the
-// connecting merchant's OAuth 1.0a Integration key pair.
+// connecting merchant's OAuth 1.0a Integration key pair or Bearer token.
+// It uses tls-client to mimic a modern browser (Chrome JA3/JA4 TLS fingerprint)
+// to bypass Cloudflare Bot Management / WAF challenges seamlessly.
 type Client struct {
 	creds      *Credentials
-	httpClient *http.Client
+	httpClient tls_client.HttpClient
 	apiBase    string // optional override for test suites
 }
 
@@ -43,14 +46,24 @@ func NewClient(creds *Credentials) *Client {
 		}
 	}
 
-	tr := &http.Transport{
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: insecure},
-		DisableCompression: true,
+	options := []tls_client.HttpClientOption{
+		tls_client.WithTimeoutSeconds(timeoutSec),
+		tls_client.WithClientProfile(profiles.Chrome_131),
+		tls_client.WithNotFollowRedirects(),
+	}
+	if insecure {
+		options = append(options, tls_client.WithInsecureSkipVerify())
+	}
+
+	httpClient, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+	if err != nil {
+		// Fallback to default client options if custom profile init fails
+		httpClient, _ = tls_client.NewHttpClient(tls_client.NewNoopLogger())
 	}
 
 	return &Client{
 		creds:      creds,
-		httpClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second, Transport: tr},
+		httpClient: httpClient,
 		apiBase:    strings.TrimRight(base, "/"),
 	}
 }
@@ -88,6 +101,25 @@ func encodeRFC3986(v url.Values) string {
 	return buf.String()
 }
 
+// applyBrowserHeaders injects browser-grade headers and custom bypass headers
+// to ensure Cloudflare WAF treats the request as a legitimate browser session.
+func (c *Client) applyBrowserHeaders(req *fhttp.Request) {
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9,vi;q=0.8")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"macOS"`)
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+
+	// Custom secret header for store-level Cloudflare WAF bypass (if configured)
+	if c != nil && c.creds != nil && c.creds.CustomHeaderName != "" && c.creds.CustomHeaderValue != "" {
+		req.Header.Set(c.creds.CustomHeaderName, c.creds.CustomHeaderValue)
+	}
+}
+
 // Request executes a request against the Magento 2 REST API.
 // If the credentials specify Bearer mode (or only access_token is configured), it uses Bearer authentication.
 // Otherwise, it falls back to OAuth 1.0a (HMAC-SHA256 with HMAC-SHA1 fallback).
@@ -111,7 +143,7 @@ func (c *Client) Request(ctx context.Context, method, path string, query url.Val
 	}
 
 	data, status, err := c.requestWithSignature(ctx, method, path, query, body, primaryMethod)
-	if status == http.StatusBadRequest && strings.Contains(string(data), "Signature method") && strings.Contains(string(data), "is not supported") {
+	if status == fhttp.StatusBadRequest && strings.Contains(string(data), "Signature method") && strings.Contains(string(data), "is not supported") {
 		return c.requestWithSignature(ctx, method, path, query, body, fallbackMethod)
 	}
 	return data, status, err
@@ -131,10 +163,12 @@ func (c *Client) requestWithBearer(ctx context.Context, method, path string, que
 		return nil, 0, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, full, reader)
+	req, err := fhttp.NewRequestWithContext(ctx, method, full, reader)
 	if err != nil {
 		return nil, 0, err
 	}
+
+	c.applyBrowserHeaders(req)
 	req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -171,10 +205,12 @@ func (c *Client) requestWithSignature(ctx context.Context, method, path string, 
 		return nil, 0, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, full, reader)
+	req, err := fhttp.NewRequestWithContext(ctx, method, full, reader)
 	if err != nil {
 		return nil, 0, err
 	}
+
+	c.applyBrowserHeaders(req)
 	req.Header.Set("Authorization", authHeader)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -204,7 +240,7 @@ func prepareRequestBody(body interface{}) (io.Reader, error) {
 	}
 }
 
-func (c *Client) doRequest(req *http.Request) ([]byte, int, error) {
+func (c *Client) doRequest(req *fhttp.Request) ([]byte, int, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("magento request failed: %w", err)
@@ -216,6 +252,18 @@ func (c *Client) doRequest(req *http.Request) ([]byte, int, error) {
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
 	}
+
+	// Check if blocked by Cloudflare challenge / WAF
+	if resp.StatusCode == fhttp.StatusForbidden || resp.StatusCode == fhttp.StatusServiceUnavailable {
+		lowerData := strings.ToLower(string(data))
+		if strings.Contains(lowerData, "just a moment...") ||
+			strings.Contains(lowerData, "challenges.cloudflare.com") ||
+			strings.Contains(lowerData, "cf-mitigated") ||
+			resp.Header.Get("cf-mitigated") == "challenge" {
+			return data, resp.StatusCode, fmt.Errorf("magento HTTP %d: Cloudflare challenge/WAF blocked request (Bot Fight Mode active). Please configure WAF skip rule or verify merchant store URL", resp.StatusCode)
+		}
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := sanitizeProviderError(string(data))
 		return data, resp.StatusCode, fmt.Errorf("magento HTTP %d: %s", resp.StatusCode, msg)
@@ -253,10 +301,11 @@ func (c *Client) GraphQL(ctx context.Context, query string, variables map[string
 		return nil, fmt.Errorf("encode graphql payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create graphql request: %w", err)
 	}
+	c.applyBrowserHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if c.creds.IsBearer() && c.creds.AccessToken != "" {
@@ -265,9 +314,10 @@ func (c *Client) GraphQL(ctx context.Context, query string, variables map[string
 
 	data, status, err := c.doRequest(req)
 	// If 401 or token error on GraphQL catalog request, fallback to public query without Authorization header
-	if (status == 401 || err != nil) && req.Header.Get("Authorization") != "" {
-		reqPublic, errPub := http.NewRequestWithContext(ctx, http.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
+	if (status == fhttp.StatusUnauthorized || err != nil) && req.Header.Get("Authorization") != "" {
+		reqPublic, errPub := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, gqlURL, bytes.NewReader(bodyBytes))
 		if errPub == nil {
+			c.applyBrowserHeaders(reqPublic)
 			reqPublic.Header.Set("Content-Type", "application/json")
 			reqPublic.Header.Set("Accept", "application/json")
 			if pubData, pubStatus, pubErr := c.doRequest(reqPublic); pubErr == nil && pubStatus >= 200 && pubStatus < 300 {

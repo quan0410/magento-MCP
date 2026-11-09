@@ -17,6 +17,8 @@ type Credentials struct {
 	AccessToken       string `json:"access_token"`
 	AccessTokenSecret string `json:"access_token_secret,omitempty"`
 	AuthMode          string `json:"auth_mode,omitempty"`
+	CustomHeaderName  string `json:"custom_header_name,omitempty"`
+	CustomHeaderValue string `json:"custom_header_value,omitempty"`
 }
 
 // IsBearer returns true if Bearer token authentication should be used.
@@ -119,6 +121,12 @@ func ParseCredentials(credentialsJSON, credentialsPath string) (*Credentials, er
 	if strings.TrimSpace(c.AuthMode) == "" {
 		c.AuthMode = os.Getenv("MAGENTO_AUTH_MODE")
 	}
+	if strings.TrimSpace(c.CustomHeaderName) == "" {
+		c.CustomHeaderName = os.Getenv("MAGENTO_CUSTOM_HEADER_NAME")
+	}
+	if strings.TrimSpace(c.CustomHeaderValue) == "" {
+		c.CustomHeaderValue = os.Getenv("MAGENTO_CUSTOM_HEADER_VALUE")
+	}
 
 	c.BaseURL = NormalizeBaseURL(c.BaseURL)
 	c.ConsumerKey = strings.TrimSpace(c.ConsumerKey)
@@ -126,6 +134,8 @@ func ParseCredentials(credentialsJSON, credentialsPath string) (*Credentials, er
 	c.AccessToken = strings.TrimSpace(c.AccessToken)
 	c.AccessTokenSecret = strings.TrimSpace(c.AccessTokenSecret)
 	c.AuthMode = strings.TrimSpace(c.AuthMode)
+	c.CustomHeaderName = strings.TrimSpace(c.CustomHeaderName)
+	c.CustomHeaderValue = strings.TrimSpace(c.CustomHeaderValue)
 
 	var missing []string
 	if c.BaseURL == "" {

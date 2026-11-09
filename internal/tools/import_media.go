@@ -45,7 +45,8 @@ func uploadProductImageFromURL(ctx context.Context, client *magento.Client, sku 
 	if err != nil {
 		return fmt.Errorf("invalid image URL '%s': %w", imageURL, err)
 	}
-	req.Header.Set("User-Agent", "DatumBridge-Magento-MCP/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 
 	resp, err := downloadClient.Do(req)
 	if err != nil {
