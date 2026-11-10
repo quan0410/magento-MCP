@@ -10,7 +10,7 @@ The MCP server decides this row. Weaver reads it on Setup and does not let an ad
 
 | Who | Token |
 |---|---|
-| external | required |
+| anonymous | none |
 
 ## Agent rules
 

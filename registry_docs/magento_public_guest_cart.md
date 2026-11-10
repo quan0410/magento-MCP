@@ -8,7 +8,7 @@ This tool is public and does not require authentication or API keys.
 
 | Who | Token |
 |---|---|
-| external | none |
+| anonymous | none |
 
 ## Agent rules
 
