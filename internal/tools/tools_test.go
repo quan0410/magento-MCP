@@ -19,8 +19,8 @@ func clearToolFilterEnv(t *testing.T) {
 func TestRegisterFullScopeByDefault(t *testing.T) {
 	clearToolFilterEnv(t)
 	descs, handlers := tools.Register()
-	if len(descs) != 49 {
-		t.Fatalf("expected full tool scope (49 tools), got %d", len(descs))
+	if len(descs) != 54 {
+		t.Fatalf("expected full tool scope (54 tools), got %d", len(descs))
 	}
 
 	wantedTools := []string{
@@ -29,6 +29,9 @@ func TestRegisterFullScopeByDefault(t *testing.T) {
 		"magento_update_product", "magento_delete_product", "magento_list_product_types",
 		"magento_get_product_import_template", "magento_import_create_products", "magento_import_update_products",
 		"magento_get_media_import_status", "magento_get_related_products",
+		// Public Storefront (5)
+		"magento_public_search_products", "magento_public_get_product", "magento_public_get_outfit",
+		"magento_public_list_categories", "magento_public_guest_cart",
 		// Orders (6)
 		"magento_list_orders", "magento_get_order", "magento_add_order_comment",
 		"magento_cancel_order", "magento_hold_order", "magento_verify_and_get_order",

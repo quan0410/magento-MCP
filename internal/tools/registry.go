@@ -20,6 +20,12 @@ var toolOutputs = map[string]string{
 	"magento_import_update_products":      "total_rows, updated_count, failed_count, failed_items, warnings",
 	"magento_get_media_import_status":     "is_running, total_queued, completed, failed, pending, recent_warnings",
 	"magento_get_related_products":        "source_sku, link_type, items",
+	// Public / Guest Storefront (GraphQL No-Auth)
+	"magento_public_search_products": "products, total_count",
+	"magento_public_get_product":     "products, items",
+	"magento_public_get_outfit":      "crosssell_outfit, upsell_alternatives, related_accessories",
+	"magento_public_list_categories": "categoryList",
+	"magento_public_guest_cart":      "cart_id, cart",
 	// Orders
 	"magento_list_orders":       "items, total_count",
 	"magento_get_order":         "entity_id, increment_id, status, grand_total, items",
@@ -163,6 +169,7 @@ func Register() ([]mcp.ToolDesc, map[string]mcp.ToolHandler) {
 	registerCmsTools(add)
 	registerProductMediaTools(add)
 	registerCartTools(add)
+	registerPublicCatalogTools(add)
 
 	return descs, handlers
 }

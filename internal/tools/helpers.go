@@ -33,6 +33,22 @@ func baseProps(extra map[string]interface{}) map[string]interface{} {
 	return props
 }
 
+// publicProps defines schema properties for public, unauthenticated tools.
+// It includes an optional store_url (which defaults to MAGENTO_BASE_URL if omitted)
+// and NO credentials_json or credentials_path.
+func publicProps(extra map[string]interface{}) map[string]interface{} {
+	props := map[string]interface{}{
+		"store_url": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional Magento store base URL (e.g. https://fashion-shop.com). Defaults to configured MAGENTO_BASE_URL if omitted.",
+		},
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
+}
+
 func schema(props map[string]interface{}, required []string) map[string]interface{} {
 	s := map[string]interface{}{
 		"type":       "object",
@@ -56,6 +72,22 @@ func clientFrom(raw json.RawMessage) (*magento.Client, map[string]interface{}, e
 		return nil, m, err
 	}
 	return magento.NewClient(creds), m, nil
+}
+
+func graphqlClientFrom(raw json.RawMessage) (*magento.GraphQLClient, map[string]interface{}, error) {
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		m = map[string]interface{}{}
+	}
+	storeURL := strArg(m, "store_url")
+	if storeURL == "" {
+		storeURL = strArg(m, "base_url")
+	}
+	client, err := magento.NewGraphQLClient(storeURL)
+	if err != nil {
+		return nil, m, err
+	}
+	return client, m, nil
 }
 
 func strArg(m map[string]interface{}, key string) string {
