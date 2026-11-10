@@ -397,3 +397,99 @@ func TestRunGetProduct_Cleo(t *testing.T) {
 	content := res["content"].([]map[string]string)[0]["text"]
 	t.Logf("OUTPUT_JSON_RESULT:\n%s", content)
 }
+
+func TestHandleListProducts_EnrichesPromotionalPrice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/V1/products":
+			// Return product with regular price 1,450,000 (such as WF-SH-002)
+			_, _ = w.Write([]byte(`{
+				"items": [
+					{
+						"id": 101,
+						"sku": "WF-SH-002",
+						"name": "Áo sơ mi lụa tơ tằm cổ Đức",
+						"price": 1450000,
+						"type_id": "configurable"
+					}
+				],
+				"total_count": 1
+			}`))
+		case "/graphql":
+			// GraphQL returns dynamic sale price 1,160,000 with 20% discount
+			_, _ = w.Write([]byte(`{
+				"data": {
+					"products": {
+						"items": [
+							{
+								"sku": "WF-SH-002",
+								"price_range": {
+									"minimum_price": {
+										"regular_price": {
+											"value": 1450000,
+											"currency": "VND"
+										},
+										"final_price": {
+											"value": 1160000,
+											"currency": "VND"
+										},
+										"discount": {
+											"amount_off": 290000,
+											"percent_off": 20
+										}
+									}
+								}
+							}
+						]
+					}
+				}
+			}`))
+		default:
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	_, handlers := Register()
+	args := map[string]interface{}{
+		"name":             "áo sơ mi",
+		"credentials_json": fmt.Sprintf(`{"base_url":"%s","consumer_key":"ck","consumer_secret":"cs","access_token":"at","access_token_secret":"ats"}`, srv.URL),
+	}
+	raw, _ := json.Marshal(args)
+	res := handlers["magento_list_products"](raw)
+	if res["isError"] == true {
+		t.Fatalf("unexpected error: %+v", res)
+	}
+
+	content := res["content"].([]map[string]string)[0]["text"]
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("failed to parse output json: %v", err)
+	}
+
+	items, ok := parsed["items"].([]interface{})
+	if !ok || len(items) == 0 {
+		t.Fatalf("expected at least 1 item in response")
+	}
+
+	item := items[0].(map[string]interface{})
+	if item["sku"] != "WF-SH-002" {
+		t.Errorf("expected sku WF-SH-002, got %v", item["sku"])
+	}
+	// Verify discounted price
+	if toFloat(item["price"]) != 1160000 {
+		t.Errorf("expected price 1160000, got %v", item["price"])
+	}
+	if toFloat(item["original_price"]) != 1450000 {
+		t.Errorf("expected original_price 1450000, got %v", item["original_price"])
+	}
+	if toFloat(item["special_price"]) != 1160000 {
+		t.Errorf("expected special_price 1160000, got %v", item["special_price"])
+	}
+	if item["discount"] != "-20%" {
+		t.Errorf("expected discount -20%%, got %v", item["discount"])
+	}
+}
+

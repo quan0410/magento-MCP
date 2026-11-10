@@ -534,6 +534,11 @@ func TestHandleGetSourceItemsMissingSKU(t *testing.T) {
 func TestHandleListProductsWithCategoryID(t *testing.T) {
 	clearToolFilterEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/graphql" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"products":{"items":[]}}}`))
+			return
+		}
 		if r.URL.Path != "/rest/V1/products" {
 			t.Errorf("unexpected path: %q", r.URL.Path)
 		}

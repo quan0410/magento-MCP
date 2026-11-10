@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -159,6 +160,7 @@ func handleMagentoListProducts(args json.RawMessage) map[string]interface{} {
 					enrichProductMedia(prod, mediaBase)
 				}
 			}
+			enrichProductsListPricing(c, client, items)
 		}
 		return jsonResult(listResp)
 	}
@@ -1203,3 +1205,182 @@ func toInt(v interface{}) int {
 		return 0
 	}
 }
+
+func enrichProductsListPricing(ctx context.Context, client *magento.Client, items []interface{}) {
+	if len(items) == 0 {
+		return
+	}
+
+	var skus []string
+	prodBySKU := make(map[string]map[string]interface{})
+
+	for _, it := range items {
+		prod, ok := it.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sku, _ := prod["sku"].(string)
+		sku = strings.TrimSpace(sku)
+		if sku != "" {
+			skus = append(skus, sku)
+			prodBySKU[sku] = prod
+		}
+
+		// 1. Fallback from custom_attributes (special_price & discount_percent)
+		var sp float64 = -1
+		var discPct float64 = -1
+		if cas, ok := prod["custom_attributes"].([]interface{}); ok {
+			for _, item := range cas {
+				if cm, ok := item.(map[string]interface{}); ok {
+					code, _ := cm["attribute_code"].(string)
+					if code == "special_price" {
+						sp = toFloat(cm["value"])
+					} else if code == "discount_percent" {
+						discPct = toFloat(cm["value"])
+					}
+				}
+			}
+		}
+
+		basePrice := toFloat(prod["price"])
+		if sp > 0 && (basePrice <= 0 || sp < basePrice) {
+			prod["price"] = sp
+			prod["special_price"] = sp
+			prod["final_price"] = sp
+			if basePrice > sp {
+				prod["original_price"] = basePrice
+				prod["regular_price"] = basePrice
+				pct := int(math.Round((basePrice - sp) / basePrice * 100))
+				prod["discount"] = fmt.Sprintf("-%d%%", pct)
+				prod["discount_percent"] = pct
+			}
+		} else if discPct > 0 && basePrice > 0 {
+			salePrice := math.Round(basePrice * (1 - discPct/100))
+			prod["price"] = salePrice
+			prod["special_price"] = salePrice
+			prod["final_price"] = salePrice
+			prod["original_price"] = basePrice
+			prod["regular_price"] = basePrice
+			prod["discount"] = fmt.Sprintf("-%d%%", int(discPct))
+			prod["discount_percent"] = discPct
+		}
+	}
+
+	// 2. Batch GraphQL query for catalog price rules & configurable product prices
+	if client == nil || len(skus) == 0 {
+		return
+	}
+
+	var formattedSKUs []string
+	for _, s := range skus {
+		formattedSKUs = append(formattedSKUs, fmt.Sprintf("%q", s))
+	}
+
+	gqlQuery := fmt.Sprintf(`query {
+  products(filter: { sku: { in: [%s] } }, pageSize: %d) {
+    items {
+      sku
+      price_range {
+        minimum_price {
+          regular_price {
+            value
+            currency
+          }
+          final_price {
+            value
+            currency
+          }
+          discount {
+            amount_off
+            percent_off
+          }
+        }
+      }
+    }
+  }
+}`, strings.Join(formattedSKUs, ", "), len(skus)+5)
+
+	data, err := client.GraphQL(ctx, gqlQuery, nil)
+	if err != nil || len(data) == 0 {
+		return
+	}
+
+	var resp struct {
+		Data struct {
+			Products struct {
+				Items []struct {
+					SKU        string `json:"sku"`
+					PriceRange struct {
+						MinimumPrice struct {
+							RegularPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"regular_price"`
+							FinalPrice struct {
+								Value    float64 `json:"value"`
+								Currency string  `json:"currency"`
+							} `json:"final_price"`
+							Discount struct {
+								AmountOff  float64 `json:"amount_off"`
+								PercentOff float64 `json:"percent_off"`
+							} `json:"discount"`
+						} `json:"minimum_price"`
+					} `json:"price_range"`
+				} `json:"items"`
+			} `json:"products"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return
+	}
+
+	for _, gItem := range resp.Data.Products.Items {
+		prod, exists := prodBySKU[gItem.SKU]
+		if !exists || prod == nil {
+			continue
+		}
+
+		minP := gItem.PriceRange.MinimumPrice
+		regPrice := minP.RegularPrice.Value
+		finPrice := minP.FinalPrice.Value
+		pctOff := minP.Discount.PercentOff
+		amtOff := minP.Discount.AmountOff
+
+		if finPrice > 0 && regPrice > 0 && finPrice < regPrice {
+			prod["price"] = finPrice
+			prod["final_price"] = finPrice
+			prod["special_price"] = finPrice
+			prod["original_price"] = regPrice
+			prod["regular_price"] = regPrice
+			if pctOff > 0 {
+				prod["discount"] = fmt.Sprintf("-%d%%", int(pctOff))
+				prod["discount_percent"] = pctOff
+			} else {
+				calcPct := int(math.Round((regPrice - finPrice) / regPrice * 100))
+				if calcPct > 0 {
+					prod["discount"] = fmt.Sprintf("-%d%%", calcPct)
+					prod["discount_percent"] = calcPct
+				}
+			}
+			if amtOff > 0 {
+				prod["discount_amount"] = amtOff
+			}
+		} else if regPrice > 0 {
+			if toFloat(prod["price"]) == 0 {
+				prod["price"] = regPrice
+			}
+			prod["regular_price"] = regPrice
+		}
+
+		if minP.RegularPrice.Currency != "" && prod["currency"] == nil {
+			curr := minP.RegularPrice.Currency
+			if curr == "VND" {
+				prod["currency"] = "đ"
+			} else {
+				prod["currency"] = curr
+			}
+		}
+	}
+}
+
